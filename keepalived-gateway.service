@@ -1,0 +1,10 @@
+[Unit]
+Description=Gateway management
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/sbin/keepalived-gateway.sh
+
+[Install]
+WantedBy=multi-user.target
