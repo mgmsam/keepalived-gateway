@@ -89,6 +89,18 @@ check_variables ()
         ;;
     esac
 
+    is_not_empty "${CHECK_INTERVAL:-}" &&
+    case "${CHECK_INTERVAL%[sS]}" in
+        "" | *[!0123456789]*)
+            echo "variable 'CHECK_INTERVAL': invalid value: '$CHECK_INTERVAL'"
+            echo "variable 'CHECK_INTERVAL': valid values: an integer indicating the number of [s]econds"
+            return 2
+        ;;
+        *)
+            CHECK_INTERVAL="${CHECK_INTERVAL%[sS]}"
+        ;;
+    esac || CHECK_INTERVAL=10
+
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE])
             SPEEDTEST=no
@@ -335,5 +347,5 @@ do
         echo "gateway is unavailable: '$CURRENT_GATEWAY'"
         false
     fi || test "$GATEWAY_NUM" -eq 1 || add_default_route
-    sleep 10
+    sleep "$CHECK_INTERVAL"
 done
