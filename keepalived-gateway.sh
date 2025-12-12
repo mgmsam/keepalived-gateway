@@ -61,6 +61,26 @@ include_config ()
 
 }
 
+parse_interval ()
+{
+    case "${2%[smhdwMy]}" in
+        "" | *[!0123456789]*)
+            echo "variable '$1': invalid value: '$2'"
+            echo "variable '$1': valid value: an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
+            return 2
+        ;;
+    esac
+    case "$2" in
+        *m) echo "$((${2%m} * 60))" ;;
+        *h) echo "$((${2%h} * 3600))" ;;
+        *d) echo "$((${2%d} * 86400))" ;;
+        *w) echo "$((${2%w} * 604800))" ;;
+        *M) echo "$((${2%M} * 2678400))" ;;
+        *y) echo "$((${2%y} * 32140800))" ;;
+         *) echo "${2%s}" ;;
+    esac
+}
+
 check_variables ()
 {
     case "${GATEWAY_IPS:-}" in
@@ -89,17 +109,7 @@ check_variables ()
         ;;
     esac
 
-    is_not_empty "${CHECK_INTERVAL:-}" &&
-    case "${CHECK_INTERVAL%[sS]}" in
-        "" | *[!0123456789]*)
-            echo "variable 'CHECK_INTERVAL': invalid value: '$CHECK_INTERVAL'"
-            echo "variable 'CHECK_INTERVAL': valid values: an integer indicating the number of [s]econds"
-            return 2
-        ;;
-        *)
-            CHECK_INTERVAL="${CHECK_INTERVAL%[sS]}"
-        ;;
-    esac || CHECK_INTERVAL=10
+    CHECK_INTERVAL="$(parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}")" || return
 
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE])
@@ -129,48 +139,13 @@ check_variables ()
         *)
             echo "variable 'SPEEDTEST_SCOPE': invalid value: '$SPEEDTEST_SCOPE'"
             echo "variable 'SPEEDTEST_SCOPE': valid values: 10M, 100M, 1000M, 10000M"
-            return 1
+            return 2
         ;;
     esac
 
-    is_not_empty "${SPEEDTEST_INTERVAL:-}" && {
-        case "${SPEEDTEST_INTERVAL%[smhdwMy]}" in
-            "" | *[!0123456789]*)
-                echo "variable 'SPEEDTEST_INTERVAL': invalid value: '$SPEEDTEST_INTERVAL'"
-                echo "variable 'SPEEDTEST_INTERVAL': valid value: an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
-                return 1
-            ;;
-        esac
-        case "$SPEEDTEST_INTERVAL" in
-            *s)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%s}"
-            ;;
-            *m)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%m}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 60))"
-            ;;
-            *h)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%h}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 3600))"
-            ;;
-            *d)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%d}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 86400))"
-            ;;
-            *w)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%w}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 604800))"
-            ;;
-            *M)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%M}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 2678400))"
-            ;;
-            *y)
-                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%y}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 32140800))"
-            ;;
-        esac
-    } || SPEEDTEST_INTERVAL=3600
+    SPEEDTEST_INTERVAL="$(parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}")" || return
+    test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
+        echo "Note: Set SPEEDTEST_INTERVAL to $CHECK_INTERVAL, because SPEEDTEST_INTERVAL [$SPEEDTEST_INTERVAL] is less than CHECK_INTERVAL [$CHECK_INTERVAL]"
 }
 
 ip_route ()
