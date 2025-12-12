@@ -89,6 +89,21 @@ check_variables ()
         ;;
     esac
 
+    case "${SPEEDTEST:-}" in
+        "" | 0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE])
+            SPEEDTEST=no
+            return
+        ;;
+        1 | [yY] | [yY][eE][sS] | [tT][rR][uU][eE])
+            SPEEDTEST=yes
+        ;;
+        *)
+            echo "variable 'SPEEDTEST': invalid value: '$SPEEDTEST'"
+            echo "variable 'SPEEDTEST': valid values: yes or no"
+            return 2
+        ;;
+    esac
+
     case "${SPEEDTEST_SCOPE:-}" in
         "")
             SPEEDTEST_SCOPE=10M
@@ -251,7 +266,10 @@ speedtest ()
 
 select_gateway ()
 {
-    is_master_state_vrrp && speedtest_interval_passed || return 0
+    is_equal "$SPEEDTEST" yes &&
+    is_master_state_vrrp &&
+    speedtest_interval_passed || return 0
+
     NEW_ROUTE= BEST_BIT= COUNT=1
     while test "$COUNT" -le "$GATEWAY_NUM"
     do
