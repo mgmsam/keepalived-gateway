@@ -18,90 +18,124 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-CONFIG_FILE="/etc/keepalived-gateway.conf"
+is_empty ()
+{
+    case "${1:-}" in
+        ?*)
+            return 1
+    esac
+}
+
+is_equal ()
+{
+    case "${1:-}" in
+        "${2:-}")
+            return 0
+    esac
+    return 1
+}
+
+is_not_empty ()
+{
+    case "${1:-}" in
+        "")
+            return 1
+    esac
+}
+
+is_file ()
+{
+    test -f "${1:-}"
+}
 
 include_config ()
 {
-    test -f "$CONFIG_FILE" || {
-        echo "no such config file: '$CONFIG_FILE'"
-        return 1
-    }
+    CONFIG_FILE="/etc/keepalived-gateway.conf"
 
-    test -r "$CONFIG_FILE" || {
-        echo "no read permission: '$CONFIG_FILE'"
+    is_file "$CONFIG_FILE" || {
+        echo "no such config file: '$CONFIG_FILE'"
         return 1
     }
 
     . "$CONFIG_FILE" || return
 
-    test "${GATEWAY:-}" || {
-        echo "variable is empty: 'GATEWAY'"
-        return 1
-    }
+}
 
-    test "${INTERFACE:-}" || {
+check_variables ()
+{
+    case "${GATEWAY_IPS:-}" in
+        *[![:space:],]*)
+            IFS="$IFS,"
+            set -- $GATEWAY_IPS
+            IFS="${IFS%,}"
+            GATEWAY_IPS="$@"
+        ;;
+        *)
+            echo "no valid gateway IPs found in 'GATEWAY_IPS' variable"
+            return 2
+        ;;
+    esac
+
+    is_not_empty "${INTERFACE:-}" || {
         echo "variable is empty: 'INTERFACE'"
         return 1
     }
 
-    test "${SPEEDTEST_SCOPE:-}" && {
-        case "$SPEEDTEST_SCOPE" in
-            10|100|1000|10000)
-                SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE}M"
-                ;;
-            10[mM]|100[mM]|1000[mM]|10000[mM])
-                SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE%[mM]}M"
-                ;;
-            *)  echo "invalid value in the 'SPEEDTEST_SCOPE' variable: '$SPEEDTEST_SCOPE'"
-                echo "acceptable values for the 'SPEEDTEST_SCOPE' variable: 10M, 100M, 1000M, 10000M"
-                return 1
-        esac
-    } || SPEEDTEST_SCOPE=10M
+    case "${SPEEDTEST_SCOPE:-}" in
+        "")
+            SPEEDTEST_SCOPE=10M
+        ;;
+        10 | 100 | 1000 |10000)
+            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE}M"
+        ;;
+        10[mM] | 100[mM] | 1000[mM] | 10000[mM])
+            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE%[mM]}M"
+        ;;
+        *)
+            echo "invalid value in the 'SPEEDTEST_SCOPE' variable: '$SPEEDTEST_SCOPE'"
+            echo "acceptable values for the 'SPEEDTEST_SCOPE' variable: 10M, 100M, 1000M, 10000M"
+            return 1
+        ;;
+    esac
 
-    test "${SPEEDTEST_INTERVAL:-}" && {
+    is_not_empty "${SPEEDTEST_INTERVAL:-}" && {
         case "${SPEEDTEST_INTERVAL%[smhdwMy]}" in
-            *[!0123456789]*)
+            "" | *[!0123456789]*)
                 echo "invalid value in the 'SPEEDTEST_INTERVAL' variable: '$SPEEDTEST_INTERVAL'"
                 echo "acceptable values for the 'SPEEDTEST_INTERVAL' variable are an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
                 return 1
+            ;;
         esac
         case "$SPEEDTEST_INTERVAL" in
-            *s) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%s}" ;;
-            *m) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%m}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 60))" ;;
-            *h) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%h}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 3600))" ;;
-            *d) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%d}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 86400))" ;;
-            *w) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%w}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 604800))" ;;
-            *M) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%M}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 2678400))" ;;
-            *y) SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%y}"
-                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 32140800))" ;;
+            *s)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%s}"
+            ;;
+            *m)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%m}"
+                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 60))"
+            ;;
+            *h)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%h}"
+                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 3600))"
+            ;;
+            *d)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%d}"
+                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 86400))"
+            ;;
+            *w)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%w}"
+                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 604800))"
+            ;;
+            *M)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%M}"
+                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 2678400))"
+            ;;
+            *y)
+                SPEEDTEST_INTERVAL="${SPEEDTEST_INTERVAL%y}"
+                SPEEDTEST_INTERVAL="$((SPEEDTEST_INTERVAL * 32140800))"
+            ;;
         esac
     } || SPEEDTEST_INTERVAL=3600
-}
-
-check_ping ()
-{
-    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$1" >/dev/null 2>&1
-}
-
-get_gataway ()
-{
-    set -- $GATEWAY
-    CURRENT_GATEWAY="$1"
-    shift
-    set -- "$@" "$CURRENT_GATEWAY"
-    GATEWAY="$@"
-    GATEWAY_NUM="$#"
-}
-
-get_default_route ()
-{
-    ROUTE="$(ip r | grep "\<$INTERFACE\>" | grep '\<default\>')" &&
-    echo "${ROUTE%"${ROUTE##*[![:blank:]]}"}"
 }
 
 ip_route ()
@@ -111,27 +145,62 @@ ip_route ()
     $EXEC && echo "$EXEC"
 }
 
+del_tmp_route ()
+{
+    if TMP_ROUTE="$(ip r | grep "^\<${REMOTE_HOST:-}\> via")"
+    then
+        ip_route del "$TMP_ROUTE" >/dev/null 2>&1
+    fi
+}
+
+cleaning_and_exit ()
+{
+    RETURN="${RETURN:-0}"
+    is_empty "${DLFILE:-}" || rm -f "$DLFILE" || RETURN=$?
+    del_tmp_route || RETURN=$?
+    exit "$RETURN"
+}
+
+get_gateway ()
+{
+    set -- $GATEWAY_IPS
+    CURRENT_GATEWAY="$1"
+    shift
+    set -- "$@" "$CURRENT_GATEWAY"
+    GATEWAY_IPS="$@"
+    GATEWAY_NUM="$#"
+}
+
+get_default_route ()
+{
+    ROUTE="$(ip r | grep "\<$INTERFACE\>" | grep '\<default\>')" &&
+    echo "${ROUTE%"${ROUTE##*[![:blank:]]}"}"
+}
+
 add_default_route ()
 {
-    get_gataway
+    get_gateway
     NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
     CURRENT_ROUTE="$(get_default_route)" && {
-        test "$CURRENT_ROUTE" = "$NEW_ROUTE" || {
+        is_equal "$CURRENT_ROUTE" "$NEW_ROUTE" || {
             ip_route del "$CURRENT_ROUTE"
             false
         }
     } || {
         CURRENT_ROUTE="$NEW_ROUTE"
-        ip_route add "$NEW_ROUTE"
+        ip_route add  "$NEW_ROUTE"
     }
+}
+
+check_ping ()
+{
+    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$1" >/dev/null 2>&1
 }
 
 is_master_state_vrrp ()
 {
-    if test "${VIRTUAL_IPADDRESS:-}"
-    then
-        ip -o -4 a | grep "$VIRTUAL_IPADDRESS" >/dev/null 2>&1
-    fi
+    is_empty "${VIRTUAL_IPADDRESS:-}" ||
+    ip -o -4 a | grep "\<$VIRTUAL_IPADDRESS\>" >/dev/null 2>&1
 }
 
 get_time ()
@@ -141,7 +210,7 @@ get_time ()
 
 speedtest_interval_passed ()
 {
-    test "${END_TEST:-}" || return 0
+    is_empty "${END_TEST:-}" ||
     test "$(($(get_time) - END_TEST))" -ge "$SPEEDTEST_INTERVAL"
 }
 
@@ -198,49 +267,33 @@ select_gateway ()
             echo "gateway is unavailable: '$CURRENT_GATEWAY'"
         fi
 
-        ip_route del "$TMP_ROUTE" >/dev/null 2>&1
-        get_gataway
+        ip_route del "$TMP_ROUTE" >/dev/null || return 0
+        get_gateway
     done
-    test -z "${NEW_ROUTE:-}" || {
-        test "$(get_default_route)" = "$NEW_ROUTE" || {
-            ip_route del "$ROUTE"
-            ip_route add "$NEW_ROUTE"
-            CURRENT_ROUTE="$NEW_ROUTE"
-        }
+    is_empty "${NEW_ROUTE:-}" || is_equal "$(get_default_route)" "$NEW_ROUTE" || {
+        echo "switching to a faster route"
+        ip_route del "$ROUTE"
+        ip_route add "$NEW_ROUTE"
+        CURRENT_ROUTE="$NEW_ROUTE"
     }
 }
 
-del_tmp_rout ()
-{
-    if  test "${REMOTE_HOST:-}" &&
-        TMP_ROUTE="$(ip r | grep "^\<$REMOTE_HOST\> via")"
-    then
-        ip_route del "$TMP_ROUTE"
-    fi
-}
-
-cleaning_and_exit ()
-{
-    RETURN="${RETURN:-0}"
-    rm -f "$DLFILE" || RETURN=$?
-    del_tmp_rout    || RETURN=$?
-    exit "$RETURN"
-}
-
+include_config && check_variables || exit
 trap cleaning_and_exit HUP INT TERM
-include_config && del_tmp_rout && add_default_route || exit
+del_tmp_route && add_default_route || exit
 
 while :
 do
     echo "the current route: '$CURRENT_ROUTE'"
-    if test "${REMOTE_HOST:-}"
+
+    if is_not_empty "${REMOTE_HOST:-}"
     then
         if check_ping "$REMOTE_HOST"
         then
             echo "host is available: '$REMOTE_HOST'"
             test "$GATEWAY_NUM" -eq 1 || select_gateway
         else
-            if check_ping  "$CURRENT_GATEWAY"
+            if check_ping "$CURRENT_GATEWAY"
             then
                 echo "host is unavailable: '$REMOTE_HOST'"
                 false
