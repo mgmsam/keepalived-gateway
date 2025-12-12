@@ -76,10 +76,18 @@ check_variables ()
         ;;
     esac
 
-    is_not_empty "${INTERFACE:-}" || {
-        echo "variable is empty: 'INTERFACE'"
-        return 1
-    }
+    case "${INTERFACE:-}" in
+        "")
+            echo "variable is empty: 'INTERFACE'"
+            return 2
+        ;;
+        *)
+            ip link show "$INTERFACE" >/dev/null 2>&1 || {
+                echo "variable: 'INTERFACE': network interface not found: '$INTERFACE'"
+                return 2
+            }
+        ;;
+    esac
 
     case "${SPEEDTEST_SCOPE:-}" in
         "")
