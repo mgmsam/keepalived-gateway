@@ -71,19 +71,19 @@ check_variables ()
             GATEWAY_IPS="$@"
         ;;
         *)
-            echo "no valid gateway IPs found in 'GATEWAY_IPS' variable"
+            echo "variable 'GATEWAY_IPS': no valid gateway IPs found"
             return 2
         ;;
     esac
 
     case "${INTERFACE:-}" in
         "")
-            echo "variable is empty: 'INTERFACE'"
+            echo "variable 'INTERFACE': is empty"
             return 2
         ;;
         *)
             ip link show "$INTERFACE" >/dev/null 2>&1 || {
-                echo "variable: 'INTERFACE': network interface not found: '$INTERFACE'"
+                echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
                 return 2
             }
         ;;
@@ -115,8 +115,8 @@ check_variables ()
             SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE%[mM]}M"
         ;;
         *)
-            echo "invalid value in the 'SPEEDTEST_SCOPE' variable: '$SPEEDTEST_SCOPE'"
-            echo "acceptable values for the 'SPEEDTEST_SCOPE' variable: 10M, 100M, 1000M, 10000M"
+            echo "variable 'SPEEDTEST_SCOPE': invalid value: '$SPEEDTEST_SCOPE'"
+            echo "variable 'SPEEDTEST_SCOPE': valid values: 10M, 100M, 1000M, 10000M"
             return 1
         ;;
     esac
@@ -124,8 +124,8 @@ check_variables ()
     is_not_empty "${SPEEDTEST_INTERVAL:-}" && {
         case "${SPEEDTEST_INTERVAL%[smhdwMy]}" in
             "" | *[!0123456789]*)
-                echo "invalid value in the 'SPEEDTEST_INTERVAL' variable: '$SPEEDTEST_INTERVAL'"
-                echo "acceptable values for the 'SPEEDTEST_INTERVAL' variable are an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
+                echo "variable 'SPEEDTEST_INTERVAL': invalid value: '$SPEEDTEST_INTERVAL'"
+                echo "variable 'SPEEDTEST_INTERVAL': valid value: an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
                 return 1
             ;;
         esac
