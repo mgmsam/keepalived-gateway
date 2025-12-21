@@ -142,19 +142,19 @@ parse_interval ()
 {
     case "${2%[smhdwMy]}" in
         "" | *[!0123456789]*)
-            echo "variable '$1': invalid value: '$2'"
+            echo "variable '$1': invalid value: '${2:-}'"
             echo "variable '$1': valid value: an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
             return 2
         ;;
     esac
     case "$2" in
-        *m) echo "$((${2%m} * 60))" ;;
-        *h) echo "$((${2%h} * 3600))" ;;
-        *d) echo "$((${2%d} * 86400))" ;;
-        *w) echo "$((${2%w} * 604800))" ;;
-        *M) echo "$((${2%M} * 2678400))" ;;
-        *y) echo "$((${2%y} * 32140800))" ;;
-         *) echo "${2%s}" ;;
+        *m) INTERVAL="$((${2%m} * 60))" ;;
+        *h) INTERVAL="$((${2%h} * 3600))" ;;
+        *d) INTERVAL="$((${2%d} * 86400))" ;;
+        *w) INTERVAL="$((${2%w} * 604800))" ;;
+        *M) INTERVAL="$((${2%M} * 2678400))" ;;
+        *y) INTERVAL="$((${2%y} * 32140800))" ;;
+         *) INTERVAL="${2%s}" ;;
     esac
 }
 
@@ -181,6 +181,7 @@ set_variables ()
                 echo "variable 'GATEWAY_IPS': $ERROR"
                 return 2
             }
+            is_diff "$#" 1 || SPEEDTEST=no
             GATEWAY_NUM="$#"
             GATEWAY_IPS="$GATEWAYS"
         ;;
@@ -192,15 +193,15 @@ set_variables ()
         return 2
     }
 
-    CHECK_INTERVAL="$(parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}")" || return
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}" || return
+    CHECK_INTERVAL="$INTERVAL"
 
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE])
             SPEEDTEST=no
-            return
         ;;
         1 | [yY] | [yY][eE][sS] | [tT][rR][uU][eE])
-            SPEEDTEST=yes
+            is_equal "$GATEWAY_NUM" 1 && SPEEDTEST=no || SPEEDTEST=yes
         ;;
         *)
             echo "variable 'SPEEDTEST': invalid value: '$SPEEDTEST'"
@@ -226,9 +227,10 @@ set_variables ()
         ;;
     esac
 
-    SPEEDTEST_INTERVAL="$(parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}")" || return
-    test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
-        echo "Note: Set SPEEDTEST_INTERVAL to $CHECK_INTERVAL, because SPEEDTEST_INTERVAL [$SPEEDTEST_INTERVAL] is less than CHECK_INTERVAL [$CHECK_INTERVAL]"
+    parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
+    SPEEDTEST_INTERVAL="$INTERVAL"
+    is_equal "$SPEEDTEST" "no" || test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
+        echo "note: SPEEDTEST_INTERVAL adjusted to $CHECK_INTERVAL (must be >= CHECK_INTERVAL)"
 }
 
 ip_route ()
