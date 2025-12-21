@@ -60,6 +60,11 @@ include_config ()
     . "$CONFIG_FILE" || return
 }
 
+is_interface ()
+{
+    ip link show "$1" >/dev/null 2>&1
+}
+
 parse_interval ()
 {
     case "${2%[smhdwMy]}" in
@@ -82,6 +87,19 @@ parse_interval ()
 
 set_variables ()
 {
+    case "${INTERFACE:-}" in
+        "")
+            echo "variable 'INTERFACE': is empty"
+            return 2
+        ;;
+        *)
+            is_interface "$INTERFACE" || {
+                echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
+                return 2
+            }
+        ;;
+    esac
+
     case "${GATEWAY_IPS:-}" in
         *[![:space:],]*)
             IFS="$IFS,"
@@ -92,19 +110,6 @@ set_variables ()
         *)
             echo "variable 'GATEWAY_IPS': no valid gateway IPs found"
             return 2
-        ;;
-    esac
-
-    case "${INTERFACE:-}" in
-        "")
-            echo "variable 'INTERFACE': is empty"
-            return 2
-        ;;
-        *)
-            ip link show "$INTERFACE" >/dev/null 2>&1 || {
-                echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
-                return 2
-            }
         ;;
     esac
 
