@@ -58,7 +58,6 @@ include_config ()
     }
 
     . "$CONFIG_FILE" || return
-
 }
 
 parse_interval ()
@@ -81,7 +80,7 @@ parse_interval ()
     esac
 }
 
-check_variables ()
+set_variables ()
 {
     case "${GATEWAY_IPS:-}" in
         *[![:space:],]*)
@@ -155,19 +154,19 @@ ip_route ()
     $EXEC && echo "$EXEC"
 }
 
-del_tmp_route ()
+remove_test_route ()
 {
     if TMP_ROUTE="$(ip r | grep "^\<${REMOTE_HOST:-}\> via")"
     then
-        ip_route del "$TMP_ROUTE" >/dev/null 2>&1
+        ip_route del "$TMP_ROUTE" 2>/dev/null
     fi
 }
 
-cleaning_and_exit ()
+clean_and_exit ()
 {
     RETURN="${RETURN:-0}"
     is_empty "${DLFILE:-}" || rm -f "$DLFILE" || RETURN=$?
-    del_tmp_route || RETURN=$?
+    remove_test_route || RETURN=$?
     exit "$RETURN"
 }
 
@@ -291,9 +290,9 @@ select_gateway ()
     }
 }
 
-include_config && check_variables || exit
-trap cleaning_and_exit HUP INT TERM
-del_tmp_route && add_default_route || exit
+include_config && set_variables || exit
+trap clean_and_exit HUP INT TERM
+remove_test_route || exit
 
 while :
 do
