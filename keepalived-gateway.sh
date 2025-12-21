@@ -65,6 +65,79 @@ is_interface ()
     ip link show "$1" >/dev/null 2>&1
 }
 
+is_metric ()
+{
+    case "${1:-}" in
+        *[!0123456789]*)
+            return 2
+        ;;
+    esac
+}
+
+parse_gateway_entry ()
+{
+    IFS="@#_=-"
+    set -- $1
+    IFS="$POSIX_IFS"
+
+    case "${1:-}" in
+        *[.:]*)
+            INTERFACE=
+            IP="$1"
+            METRIC="${2:-}"
+        ;;
+        *)
+            INTERFACE="${1:-}"
+            IP="${2:-}"
+            METRIC="${3:-}"
+        ;;
+    esac
+
+    case "${IP:-}" in
+        *[.:]*)
+        ;;
+        *)
+            ERROR="invalid gateway IP: '$IP'"
+            return 2
+        ;;
+    esac
+
+    is_metric "${METRIC:-}" || {
+        ERROR="invalid route metric for gateway '$IP': '$METRIC'"
+        return 2
+    }
+    is_not_empty "${DEFAULT_METRIC:-}" &&
+        METRIC="=${METRIC:-"$DEFAULT_METRIC"}" ||
+        METRIC="${METRIC:+"=$METRIC"}"
+
+    case "${INTERFACE:-}" in
+        "")
+            is_not_empty "${DEFAULT_INTERFACE:-}" || {
+                ERROR="missing interface for gateway: '$IP'"
+                return 2
+            }
+            GATEWAY="$DEFAULT_INTERFACE=$IP${METRIC:-}"
+        ;;
+        *)
+            is_interface "$INTERFACE" || {
+                ERROR="network interface not found: '$INTERFACE'"
+                return 2
+            }
+            GATEWAY="$INTERFACE=$IP${METRIC:-}"
+        ;;
+    esac
+}
+
+parse_gateway ()
+{
+    GATEWAYS=
+    for GATEWAY
+    do
+        parse_gateway_entry "$GATEWAY" || return
+        GATEWAYS="${GATEWAYS:+"$GATEWAYS "}$GATEWAY"
+    done
+}
+
 parse_interval ()
 {
     case "${2%[smhdwMy]}" in
@@ -87,31 +160,37 @@ parse_interval ()
 
 set_variables ()
 {
-    case "${INTERFACE:-}" in
-        "")
-            echo "variable 'INTERFACE': is empty"
-            return 2
-        ;;
-        *)
-            is_interface "$INTERFACE" || {
-                echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
-                return 2
-            }
-        ;;
-    esac
+    is_interface "${INTERFACE:-}" || {
+        echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
+        return 2
+    }
+    DEFAULT_INTERFACE="${INTERFACE:-}"
+
+    is_metric "${METRIC:-}" || {
+        echo "variable 'METRIC': invalid route metric: '$METRIC'"
+        return 2
+    }
+    DEFAULT_METRIC="${METRIC:-}"
 
     case "${GATEWAY_IPS:-}" in
         *[![:space:],]*)
             IFS="$IFS,"
             set -- $GATEWAY_IPS
-            IFS="${IFS%,}"
-            GATEWAY_IPS="$@"
+            IFS="$POSIX_IFS"
+            parse_gateway "$@" || {
+                echo "variable 'GATEWAY_IPS': $ERROR"
+                return 2
+            }
+            GATEWAY_NUM="$#"
+            GATEWAY_IPS="$GATEWAYS"
         ;;
         *)
-            echo "variable 'GATEWAY_IPS': no valid gateway IPs found"
-            return 2
+            false
         ;;
-    esac
+    esac || {
+        echo "variable 'GATEWAY_IPS': no valid gateways found"
+        return 2
+    }
 
     CHECK_INTERVAL="$(parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}")" || return
 
@@ -294,6 +373,9 @@ select_gateway ()
         CURRENT_ROUTE="$NEW_ROUTE"
     }
 }
+
+POSIX_IFS="$(printf ' \t\n')"
+IFS="$POSIX_IFS"
 
 include_config && set_variables || exit
 trap clean_and_exit HUP INT TERM
