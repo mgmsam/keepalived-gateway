@@ -106,9 +106,9 @@ parse_gateway_entry ()
         ERROR="invalid route metric for gateway '$IP': '$METRIC'"
         return 2
     }
-    is_not_empty "${DEFAULT_METRIC:-}" &&
-        METRIC="=${METRIC:-"$DEFAULT_METRIC"}" ||
-        METRIC="${METRIC:+"=$METRIC"}"
+    is_empty "${DEFAULT_METRIC:-}" &&
+        METRIC="${METRIC:+"=$METRIC"}" ||
+        METRIC="=${METRIC:-"$DEFAULT_METRIC"}"
 
     case "${INTERFACE:-}" in
         "")
