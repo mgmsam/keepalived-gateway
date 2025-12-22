@@ -263,10 +263,10 @@ ip_route ()
 
 remove_test_route ()
 {
-    if TMP_ROUTE="$(ip r | grep "^\<${REMOTE_HOST:-}\> via")"
+    if TMP_ROUTE="$(ip route list "${REMOTE_HOST:-}")"
     then
-        ip_route del "$TMP_ROUTE" 2>/dev/null
-    fi
+        ip_route del "$TMP_ROUTE"
+    fi 2>/dev/null
 }
 
 clean_and_exit ()
@@ -289,7 +289,7 @@ get_gateway ()
 
 get_default_route ()
 {
-    ROUTE="$(ip r | grep "\<$INTERFACE\>" | grep '\<default\>')" &&
+    ROUTE="$(ip route list default dev "$INTERFACE" 2>/dev/null)" &&
     echo "${ROUTE%"${ROUTE##*[![:blank:]]}"}"
 }
 
@@ -402,15 +402,8 @@ select_gateway ()
     fi
 }
 
-POSIX_IFS="$(printf ' \t\n')"
-IFS="$POSIX_IFS"
-
-include_config && set_variables || exit
-trap clean_and_exit HUP INT TERM
-remove_test_route || add_default_route || exit
-
-while :
-do
+maintain_route ()
+{
     echo "the current route: '$CURRENT_ROUTE'"
 
     if is_not_empty "${REMOTE_HOST:-}"
@@ -436,5 +429,17 @@ do
         echo "gateway is unavailable: '$CURRENT_GATEWAY'"
         false
     fi || test "$GATEWAY_NUM" -eq 1 || add_default_route
+}
+
+POSIX_IFS="$(printf ' \t\n')"
+IFS="$POSIX_IFS"
+
+include_config && set_variables || exit
+trap clean_and_exit HUP INT TERM
+remove_test_route || add_default_route || exit
+
+while :
+do
+    maintain_route
     sleep "$CHECK_INTERVAL"
 done
