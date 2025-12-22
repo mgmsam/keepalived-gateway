@@ -197,10 +197,10 @@ set_variables ()
     CHECK_INTERVAL="$INTERVAL"
 
     case "${SPEEDTEST:-}" in
-        "" | 0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE])
+        "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
             SPEEDTEST=no
         ;;
-        1 | [yY] | [yY][eE][sS] | [tT][rR][uU][eE])
+        1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
             is_equal "$GATEWAY_NUM" 1 && SPEEDTEST=no || SPEEDTEST=yes
         ;;
         *)
