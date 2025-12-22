@@ -74,6 +74,23 @@ is_metric ()
     esac
 }
 
+set_family_address ()
+{
+    case "${1:-}" in
+        "")
+        ;;
+        *.*)
+            FAMILY=inet
+        ;;
+        *:*)
+            FAMILY=inet6
+        ;;
+        *)
+            return 2
+        ;;
+    esac
+}
+
 parse_gateway_entry ()
 {
     IFS="@#_=-"
@@ -171,6 +188,11 @@ set_variables ()
         return 2
     }
     DEFAULT_METRIC="${METRIC:-}"
+
+    set_family_address "${VIRTUAL_IPADDRESS:-}" || {
+        echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
+        return 2
+    }
 
     case "${GATEWAY_IPS:-}" in
         *[![:space:],]*)
@@ -293,8 +315,9 @@ check_ping ()
 
 is_master_state_vrrp ()
 {
-    is_empty "${VIRTUAL_IPADDRESS:-}" ||
-    ip -o -4 a | grep "\<$VIRTUAL_IPADDRESS\>" >/dev/null 2>&1
+    is_empty "${VIRTUAL_IPADDRESS:-}" || {
+        ip -oneline -family "$FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>"
+    } >/dev/null 2>&1
 }
 
 get_time ()
