@@ -235,8 +235,7 @@ set_variables ()
 
 ip_route ()
 {
-    ROUTE="$2"
-    EXEC="ip route $1 $ROUTE"
+    EXEC="ip route $1 $2"
     $EXEC && echo "$EXEC"
 }
 
@@ -368,12 +367,16 @@ select_gateway ()
         ip_route del "$TMP_ROUTE" >/dev/null || return 0
         get_gateway
     done
-    is_empty "${NEW_ROUTE:-}" || is_equal "$(get_default_route)" "$NEW_ROUTE" || {
-        echo "switching to a faster route"
-        ip_route del "$ROUTE"
-        ip_route add "$NEW_ROUTE"
-        CURRENT_ROUTE="$NEW_ROUTE"
-    }
+    is_empty "${NEW_ROUTE:-}" ||
+    if CURRENT_ROUTE="$(get_default_route)"
+    then
+        is_equal "$CURRENT_ROUTE" "$NEW_ROUTE" || {
+            echo "switching to a faster route"
+            ip_route del "$ROUTE"
+            ip_route add "$NEW_ROUTE"
+            CURRENT_ROUTE="$NEW_ROUTE"
+        }
+    fi
 }
 
 POSIX_IFS="$(printf ' \t\n')"
@@ -381,7 +384,7 @@ IFS="$POSIX_IFS"
 
 include_config && set_variables || exit
 trap clean_and_exit HUP INT TERM
-remove_test_route || exit
+remove_test_route || add_default_route || exit
 
 while :
 do
