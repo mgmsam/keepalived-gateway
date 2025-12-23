@@ -18,6 +18,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+is_diff () {
+    case "${1:-}" in
+        "${2:-}")
+            return 1
+    esac
+}
+
 is_empty ()
 {
     case "${1:-}" in
@@ -346,14 +353,18 @@ bit2Human ()
 speedtest ()
 {
     DLFILE=$(mktemp /tmp/download.XXXXXX)
-    START_TEST="$(get_time)"
-    timeout 15 wget "http://$REMOTE_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" 2>/dev/null
-    END_TEST="$(get_time)"
-    BYTE="$(awk '{s+=$1} END {print s}' "$DLFILE")"
-    BIT="$((BYTE * 16))"
-    BIT="$((BIT / $((END_TEST - START_TEST))))"
-    SPEED="$(bit2Human "$BIT")/s"
-    rm -f "$DLFILE"
+    {
+        START_TEST="$(get_time)"
+        timeout 15 wget "http://$REMOTE_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" || :
+        END_TEST="$(get_time)"
+        BYTE="$(awk '{s+=$1} END {print s}' "$DLFILE")" || :
+        rm -f "$DLFILE" || :
+    } 2>/dev/null
+    is_not_empty "${BYTE:-}" && {
+        BIT="$((BYTE * 16))"
+        BIT="$((BIT / $((END_TEST - START_TEST))))"
+        echo "route speed: $(bit2Human "$BIT")/s"
+    }
 }
 
 select_gateway ()
@@ -372,12 +383,13 @@ select_gateway ()
 
         if check_ping "$REMOTE_HOST"
         then
-            speedtest
-            echo "route speed: $SPEED"
-            test "${BEST_BIT:-0}" -ge "$BIT" || {
-                BEST_BIT="$BIT"
-                NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
-            }
+            if speedtest
+            then
+                test "${BEST_BIT:-0}" -ge "$BIT" || {
+                    BEST_BIT="$BIT"
+                    NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
+                }
+            fi
         elif check_ping "$CURRENT_GATEWAY"
         then
             echo "host is unavailable: '$REMOTE_HOST'"
