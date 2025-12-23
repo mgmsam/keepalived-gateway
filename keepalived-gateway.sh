@@ -94,7 +94,7 @@ set_family_address ()
 parse_gateway_entry ()
 {
     IFS="@#_=-"
-    set -- $1
+    set -- $GATEWAY
     IFS="$POSIX_IFS"
 
     case "${1:-}" in
@@ -123,24 +123,22 @@ parse_gateway_entry ()
         ERROR="invalid route metric for gateway '$IP': '$METRIC'"
         return 2
     }
-    is_empty "${DEFAULT_METRIC:-}" &&
-        METRIC="${METRIC:+"=$METRIC"}" ||
-        METRIC="=${METRIC:-"$DEFAULT_METRIC"}"
+    METRIC="${METRIC:-"${DEFAULT_METRIC:-0}"}"
 
     case "${INTERFACE:-}" in
         "")
             is_not_empty "${DEFAULT_INTERFACE:-}" || {
-                ERROR="missing interface for gateway: '$IP'"
+                ERROR="missing interface for gateway: '$GATEWAY'"
                 return 2
             }
-            GATEWAY="$DEFAULT_INTERFACE=$IP${METRIC:-}"
+            GATEWAY="$DEFAULT_INTERFACE=$IP=$METRIC"
         ;;
         *)
             is_interface "$INTERFACE" || {
                 ERROR="network interface not found: '$INTERFACE'"
                 return 2
             }
-            GATEWAY="$INTERFACE=$IP${METRIC:-}"
+            GATEWAY="$INTERFACE=$IP=$METRIC"
         ;;
     esac
 }
@@ -150,7 +148,7 @@ parse_gateway ()
     GATEWAYS=
     for GATEWAY
     do
-        parse_gateway_entry "$GATEWAY" || return
+        parse_gateway_entry || return
         GATEWAYS="${GATEWAYS:+"$GATEWAYS "}$GATEWAY"
     done
 }
