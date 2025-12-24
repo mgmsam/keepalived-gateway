@@ -257,9 +257,13 @@ set_variables ()
 
     parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
     SPEEDTEST_INTERVAL="$INTERVAL"
-    is_not_empty "${SPEEDTEST_HOST:-}" || SPEEDTEST=no
-    is_equal "$SPEEDTEST" "no" || test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
-        echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
+
+    is_equal "$SPEEDTEST" "no" || {
+        is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
+            test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
+            echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
+        }
+    }
 }
 
 ip_route ()
