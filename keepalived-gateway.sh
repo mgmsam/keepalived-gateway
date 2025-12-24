@@ -72,15 +72,6 @@ is_interface ()
     ip link show "$1" >/dev/null 2>&1
 }
 
-is_metric ()
-{
-    case "${1:-}" in
-        *[!0123456789]*)
-            return 2
-        ;;
-    esac
-}
-
 set_family_address ()
 {
     case "${1:-}" in
@@ -126,28 +117,36 @@ parse_gateway_entry ()
         ;;
     esac
 
-    is_metric "${METRIC:-}" || {
-        ERROR="invalid route metric for gateway '$IP': '$METRIC'"
-        return 2
-    }
-    METRIC="${METRIC:-"${DEFAULT_METRIC:-0}"}"
-
     case "${INTERFACE:-}" in
         "")
             is_not_empty "${DEFAULT_INTERFACE:-}" || {
-                ERROR="missing interface for gateway: '$GATEWAY'"
+                ERROR="missing interface for gateway: '$IP'"
                 return 2
             }
-            GATEWAY="$DEFAULT_INTERFACE=$IP=$METRIC"
+            INTERFACE="$DEFAULT_INTERFACE"
         ;;
         *)
             is_interface "$INTERFACE" || {
                 ERROR="network interface not found: '$INTERFACE'"
                 return 2
             }
-            GATEWAY="$INTERFACE=$IP=$METRIC"
         ;;
     esac
+
+    case "${METRIC:-}" in
+        "")
+            is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
+        ;;
+        *[!0123456789]*)
+            ERROR="invalid route metric for gateway '$INTERFACE=$IP': '$METRIC'"
+            return 2
+        ;;
+        0*)
+            METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+        ;;
+    esac
+
+    GATEWAY="$INTERFACE=$IP${METRIC:+"=$METRIC"}"
 }
 
 parse_gateway ()
@@ -188,10 +187,15 @@ set_variables ()
     }
     DEFAULT_INTERFACE="${INTERFACE:-}"
 
-    is_metric "${METRIC:-}" || {
-        echo "variable 'METRIC': invalid route metric: '$METRIC'"
-        return 2
-    }
+    case "${METRIC:=0}" in
+        *[!0123456789]*)
+            echo "variable 'METRIC': invalid route metric: '$METRIC'"
+            return 2
+        ;;
+        0*)
+            METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+        ;;
+    esac
     DEFAULT_METRIC="${METRIC:-}"
 
     set_family_address "${VIRTUAL_IPADDRESS:-}" || {
