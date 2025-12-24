@@ -163,8 +163,7 @@ parse_interval ()
 {
     case "${2%[smhdwMy]}" in
         "" | *[!0123456789]*)
-            echo "variable '$1': invalid value: '${2:-}'"
-            echo "variable '$1': valid value: an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
+            echo "variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
             return 2
         ;;
     esac
@@ -220,7 +219,7 @@ set_variables ()
             false
         ;;
     esac || {
-        echo "variable 'GATEWAY_IPS': no valid gateways found"
+        echo "variable 'GATEWAY_IPS': no valid gateways found: '$GATEWAY_IPS'"
         return 2
     }
 
@@ -235,8 +234,7 @@ set_variables ()
             is_equal "$GATEWAY_NUM" 1 && SPEEDTEST=no || SPEEDTEST=yes
         ;;
         *)
-            echo "variable 'SPEEDTEST': invalid value: '$SPEEDTEST'"
-            echo "variable 'SPEEDTEST': valid values: yes or no"
+            echo "variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
             return 2
         ;;
     esac
@@ -252,8 +250,7 @@ set_variables ()
             SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE%[mM]}M"
         ;;
         *)
-            echo "variable 'SPEEDTEST_SCOPE': invalid value: '$SPEEDTEST_SCOPE'"
-            echo "variable 'SPEEDTEST_SCOPE': valid values: 10M, 100M, 1000M, 10000M"
+            echo "variable 'SPEEDTEST_SCOPE': must be '10|100|1000|10000'[M], but got: '$SPEEDTEST_SCOPE'"
             return 2
         ;;
     esac
@@ -261,7 +258,7 @@ set_variables ()
     parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
     SPEEDTEST_INTERVAL="$INTERVAL"
     is_equal "$SPEEDTEST" "no" || test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
-        echo "note: SPEEDTEST_INTERVAL adjusted to $CHECK_INTERVAL (must be >= CHECK_INTERVAL)"
+        echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
 }
 
 ip_route ()
