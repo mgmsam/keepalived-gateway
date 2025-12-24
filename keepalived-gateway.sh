@@ -321,7 +321,7 @@ add_default_route ()
 
 check_ping ()
 {
-    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$1" >/dev/null 2>&1
+    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$@" >/dev/null 2>&1
 }
 
 is_master_state_vrrp ()
@@ -371,6 +371,61 @@ speedtest ()
         BIT="$((BIT / $((END_TEST - START_TEST))))"
         echo "route speed: $(bit2Human "$BIT")/s"
     }
+}
+
+format_route ()
+{
+    IFS="=" read -r INTERFACE GATEWAY METRIC <<EOF
+$GATEWAY
+EOF
+    METRIC="${METRIC:+ metric $METRIC}"
+    ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:-}"
+}
+
+maintain_route ()
+{
+    BEST_BIT=0
+    for GATEWAY in $GATEWAY_IPS
+    do
+        format_route
+        is_equal "$SPEEDTEST" no || {
+            SPEEDTEST_ROUTE="$SPEEDTEST_HOST via $GATEWAY dev $INTERFACE"
+            ip route replace $SPEEDTEST_ROUTE
+
+            if speedtest
+            then
+                test "$BEST_BIT" -ge "$BIT" || {
+                    BEST_BIT="$BIT"
+                    ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE"
+                }
+                ip route del $SPEEDTEST_ROUTE
+                continue
+            fi
+
+            ip route del $SPEEDTEST_ROUTE
+            echo "failed to measure speed from '$SPEEDTEST_HOST' via route '$SPEEDTEST_ROUTE'"
+        }
+
+        if is_not_empty "${PING_HOST:-}"
+        then
+            PING_ROUTE="$PING_HOST via $GATEWAY dev $INTERFACE"
+            ip route replace $PING_ROUTE
+
+            check_ping "$PING_HOST" &&
+            ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE" || {
+                echo "host '$PING_HOST' is unreachable via route '$PING_ROUTE'"
+                check_ping -I "$INTERFACE" "$GATEWAY" &&
+                echo "gateway '$GATEWAY' is reachable on interface '$INTERFACE'" ||
+                echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
+            }
+
+            ip route del $PING_ROUTE
+        else
+            check_ping -I "$INTERFACE" "$GATEWAY" &&
+            ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE" ||
+            echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
+        fi
+    done
 }
 
 select_gateway ()
@@ -443,6 +498,7 @@ maintain_route ()
     fi || test "$GATEWAY_NUM" -eq 1 || add_default_route
 }
 
+LF="$(printf '\n')"
 POSIX_IFS="$(printf ' \t\n')"
 IFS="$POSIX_IFS"
 
