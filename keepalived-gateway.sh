@@ -257,6 +257,7 @@ set_variables ()
 
     parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
     SPEEDTEST_INTERVAL="$INTERVAL"
+    is_not_empty "${SPEEDTEST_HOST:-}" || SPEEDTEST=no
     is_equal "$SPEEDTEST" "no" || test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
         echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
 }
@@ -356,7 +357,7 @@ speedtest ()
     DLFILE=$(mktemp /tmp/download.XXXXXX)
     {
         START_TEST="$(get_time)"
-        timeout 15 wget "http://$REMOTE_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" || :
+        timeout 15 wget "http://$SPEEDTEST_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" || :
         END_TEST="$(get_time)"
         BYTE="$(awk '{s+=$1} END {print s}' "$DLFILE")" || :
         rm -f "$DLFILE" || :
@@ -370,30 +371,23 @@ speedtest ()
 
 select_gateway ()
 {
-    is_equal "$SPEEDTEST" yes &&
-    is_master_state_vrrp &&
-    speedtest_interval_passed || return 0
-
     NEW_ROUTE= BEST_BIT= COUNT=1
     while test "$COUNT" -le "$GATEWAY_NUM"
     do
         COUNT="$((COUNT + 1))"
-        TMP_ROUTE="$REMOTE_HOST via $CURRENT_GATEWAY dev $INTERFACE"
+        TMP_ROUTE="$SPEEDTEST_HOST via $CURRENT_GATEWAY dev $INTERFACE"
         echo "running speedtest every '$SPEEDTEST_INTERVAL seconds' for a temp route: '$TMP_ROUTE'"
         ip_route add "$TMP_ROUTE" >/dev/null || return 0
 
-        if check_ping "$REMOTE_HOST"
+        if speedtest
         then
-            if speedtest
-            then
-                test "${BEST_BIT:-0}" -ge "$BIT" || {
-                    BEST_BIT="$BIT"
-                    NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
-                }
-            fi
+            test "${BEST_BIT:-0}" -ge "$BIT" || {
+                BEST_BIT="$BIT"
+                NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
+            }
         elif check_ping "$CURRENT_GATEWAY"
         then
-            echo "host is unavailable: '$REMOTE_HOST'"
+            echo "host is unavailable: '$SPEEDTEST_HOST'"
         else
             echo "gateway is unavailable: '$CURRENT_GATEWAY'"
         fi
@@ -417,12 +411,15 @@ maintain_route ()
 {
     echo "the current route: '$CURRENT_ROUTE'"
 
-    if is_not_empty "${REMOTE_HOST:-}"
+    if is_not_empty "${PING_HOST:-}"
     then
-        if check_ping "$REMOTE_HOST"
+        if check_ping "$PING_HOST"
         then
-            echo "host is available: '$REMOTE_HOST'"
-            test "$GATEWAY_NUM" -eq 1 || select_gateway
+            echo "host is available: '$PING_HOST'"
+            is_equal "$SPEEDTEST" no || {
+                is_master_state_vrrp  &&
+                speedtest_interval_passed && select_gateway || :
+            }
         else
             if check_ping "$CURRENT_GATEWAY"
             then
