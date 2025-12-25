@@ -18,7 +18,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-is_diff () {
+is_diff ()
+{
     case "${1:-}" in
         "${2:-}")
             return 1
@@ -356,10 +357,11 @@ check_ping ()
     ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$@" >/dev/null 2>&1
 }
 
-is_master_state_vrrp ()
+is_not_vrrp_master ()
 {
-    is_empty "${VIRTUAL_IPADDRESS:-}" || {
-        ip -oneline -family "$FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>"
+    is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
+        ip -oneline -family "$FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>" &&
+        return 1 || return 0
     } >/dev/null 2>&1
 }
 
@@ -368,10 +370,10 @@ get_time ()
     date "+%s"
 }
 
-speedtest_interval_passed ()
+wait_for_speedtest ()
 {
-    is_empty "${END_TEST:-}" ||
-    test "$(($(get_time) - END_TEST))" -ge "$SPEEDTEST_INTERVAL"
+    is_not_empty "${END_TEST:-}" &&
+    test "$(($(get_time) - END_TEST))" -lt "$SPEEDTEST_INTERVAL"
 }
 
 bit2Human ()
@@ -489,7 +491,7 @@ maintain_route ()
     for GATEWAY in $GATEWAY_IPS
     do
         format_route
-        is_equal "$SPEEDTEST" no || {
+        is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
             SPEEDTEST_ROUTE="$SPEEDTEST_HOST via $GATEWAY dev $INTERFACE"
             ip route replace $SPEEDTEST_ROUTE
 
@@ -582,8 +584,9 @@ maintain_route ()
         then
             echo "host is available: '$PING_HOST'"
             is_equal "$SPEEDTEST" no || {
-                is_master_state_vrrp  &&
-                speedtest_interval_passed && select_gateway || :
+                wait_for_speedtest ||
+                is_not_vrrp_master ||
+                    select_gateway || :
             }
         else
             if check_ping "$CURRENT_GATEWAY"
