@@ -151,7 +151,7 @@ parse_gateway_entry ()
 
 optimize_gateways ()
 {
-    GATEWAYS=$(echo "$GATEWAYS" | awk -F'=' '
+    GATEWAYS="$(echo "$GATEWAYS" | awk -F'=' '
         {
             interface = $1
             gateway = $2
@@ -177,7 +177,7 @@ optimize_gateways ()
                 }
             }
         }
-    ')
+    ')"
 }
 
 parse_gateway ()
@@ -449,7 +449,7 @@ get_current_routes ()
 get_obsolete_routes ()
 {
     is_not_empty "${CURRENT_ROUTES:-}" || return
-    REMOVE_ROUTES=$(printf "%s\n\n%s" "$ROUTES" "$CURRENT_ROUTES" | awk '
+    REMOVE_ROUTES="$(printf "%s\n\n%s" "$ROUTES" "$CURRENT_ROUTES" | awk '
         BEGIN {
             found_separator = 0
         }
@@ -467,7 +467,7 @@ get_obsolete_routes ()
         found_separator && !($0 in wanted) {
             print $0
         }
-    ')
+    ')"
 }
 
 remove_obsolete_routes ()
