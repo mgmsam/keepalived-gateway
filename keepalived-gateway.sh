@@ -98,21 +98,21 @@ parse_gateway_entry ()
     case "${1:-}" in
         *[.:]*)
             INTERFACE=
-            IP="$1"
+            GATEWAY="$1"
             METRIC="${2:-}"
         ;;
         *)
             INTERFACE="${1:-}"
-            IP="${2:-}"
+            GATEWAY="${2:-}"
             METRIC="${3:-}"
         ;;
     esac
 
-    case "${IP:-}" in
+    case "${GATEWAY:-}" in
         *[.:]*)
         ;;
         *)
-            ERROR="invalid gateway IP: '$IP'"
+            ERROR="invalid gateway: '$GATEWAY'"
             return 2
         ;;
     esac
@@ -120,7 +120,7 @@ parse_gateway_entry ()
     case "${INTERFACE:-}" in
         "")
             is_not_empty "${DEFAULT_INTERFACE:-}" || {
-                ERROR="missing interface for gateway: '$IP'"
+                ERROR="missing interface for gateway: '$GATEWAY'"
                 return 2
             }
             INTERFACE="$DEFAULT_INTERFACE"
@@ -138,7 +138,7 @@ parse_gateway_entry ()
             is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
         ;;
         *[!0123456789]*)
-            ERROR="invalid route metric for gateway '$INTERFACE=$IP': '$METRIC'"
+            ERROR="invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
             return 2
         ;;
         0*)
@@ -146,7 +146,38 @@ parse_gateway_entry ()
         ;;
     esac
 
-    GATEWAY="$INTERFACE=$IP${METRIC:+"=$METRIC"}"
+    GATEWAY="$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
+}
+
+optimize_gateways ()
+{
+    GATEWAYS=$(echo "$GATEWAYS" | awk -F'=' '
+        {
+            interface = $1
+            gateway = $2
+            metric = ($3 == "" ? 0 : $3)
+            key = interface "=" gateway
+
+            if (!(key in best_metric) || metric < best_metric[key]) {
+                best_metric[key] = metric
+                full_record[key] = $0
+                pos[key] = ++global_idx
+            }
+        }
+        END {
+            for (k in pos) {
+                sequence[pos[k]] = full_record[k]
+            }
+
+            first = 1
+            for (i = 1; i <= global_idx; i++) {
+                if (i in sequence) {
+                    printf "%s%s", (first ? "" : " "), sequence[i]
+                    first = 0
+                }
+            }
+        }
+    ')
 }
 
 parse_gateway ()
@@ -155,8 +186,9 @@ parse_gateway ()
     for GATEWAY
     do
         parse_gateway_entry || return
-        GATEWAYS="${GATEWAYS:+"$GATEWAYS "}$GATEWAY"
+        GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$GATEWAY"
     done
+    optimize_gateways
 }
 
 parse_interval ()
