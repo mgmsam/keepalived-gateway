@@ -388,6 +388,9 @@ format_route ()
 $GATEWAY
 EOF
     IFS="$POSIX_IFS"
+
+    is_interface "$INTERFACE" || return
+
     METRIC="${METRIC:+" metric $METRIC"}"
     ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:-}"
     case " ${IFACES:-} " in
@@ -464,7 +467,7 @@ maintain_route ()
     ROUTES=""
     for GATEWAY in $GATEWAY_IPS
     do
-        format_route
+        format_route || continue
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
             SPEEDTEST_ROUTE="$SPEEDTEST_HOST via $GATEWAY dev $INTERFACE"
             ip route replace $SPEEDTEST_ROUTE
