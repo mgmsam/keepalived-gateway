@@ -407,16 +407,85 @@ speedtest ()
 
 format_route ()
 {
-    IFS="=" read -r INTERFACE GATEWAY METRIC <<EOF
+    IFS="="
+    read INTERFACE GATEWAY METRIC <<EOF
 $GATEWAY
 EOF
-    METRIC="${METRIC:+ metric $METRIC}"
+    IFS="$POSIX_IFS"
+    METRIC="${METRIC:+" metric $METRIC"}"
     ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:-}"
+    case " ${IFACES:-} " in
+        *" $INTERFACE "*)
+        ;;
+        *)
+            IFACES="${IFACES:+"$IFACES "}$INTERFACE"
+        ;;
+    esac
+}
+
+add_route ()
+{
+    is_not_empty "${ROUTES:-}" || return
+    while read ROUTE
+    do
+        ip route replace $ROUTE || :
+    done <<EOF
+$ROUTES
+EOF
+}
+
+get_current_routes ()
+{
+    CURRENT_ROUTES=
+    for INTERFACE in $IFACES
+    do
+        if ROUTE="$(ip route show default dev "$INTERFACE" 2>/dev/null)"
+        then
+            CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
+        fi
+    done
+}
+
+get_obsolete_routes ()
+{
+    is_not_empty "${CURRENT_ROUTES:-}" || return
+    REMOVE_ROUTES=$(printf "%s\n\n%s" "$ROUTES" "$CURRENT_ROUTES" | awk '
+        BEGIN {
+            found_separator = 0
+        }
+
+        $0 == "" && found_separator == 0 {
+            found_separator = 1;
+            next
+        }
+
+        !found_separator {
+            wanted[$0] = 1
+            next
+        }
+
+        found_separator && !($0 in wanted) {
+            print $0
+        }
+    ')
+}
+
+remove_obsolete_routes ()
+{
+    is_not_empty "${REMOVE_ROUTES:-}" || return
+    while read ROUTE
+    do
+        ip route del $ROUTE
+    done <<EOF
+$REMOVE_ROUTES
+EOF
 }
 
 maintain_route ()
 {
     BEST_BIT=0
+    IFACES=""
+    ROUTES=""
     for GATEWAY in $GATEWAY_IPS
     do
         format_route
@@ -458,6 +527,11 @@ maintain_route ()
             echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
         fi
     done
+
+    add_route &&
+    get_current_routes &&
+    get_obsolete_routes &&
+    remove_obsolete_routes || :
 }
 
 select_gateway ()
