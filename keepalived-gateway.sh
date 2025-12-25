@@ -307,9 +307,14 @@ ip_route ()
 
 remove_test_route ()
 {
-    if TMP_ROUTE="$(ip route list "${REMOTE_HOST:-}")"
+    if PING_ROUTE="$(ip route list "${PING_HOST:-}")"
     then
-        ip_route del "$TMP_ROUTE"
+        ip_route del "$PING_ROUTE"
+    fi 2>/dev/null
+
+    if SPEEDTEST_ROUTE="$(ip route list "${SPEEDTEST_HOST:-}")"
+    then
+        ip_route del "$SPEEDTEST_ROUTE"
     fi 2>/dev/null
 }
 
@@ -319,37 +324,6 @@ clean_and_exit ()
     is_empty "${DLFILE:-}" || rm -f "$DLFILE" || RETURN=$?
     remove_test_route || RETURN=$?
     exit "$RETURN"
-}
-
-get_gateway ()
-{
-    set -- $GATEWAY_IPS
-    CURRENT_GATEWAY="$1"
-    shift
-    set -- "$@" "$CURRENT_GATEWAY"
-    GATEWAY_IPS="$@"
-    GATEWAY_NUM="$#"
-}
-
-get_default_route ()
-{
-    ROUTE="$(ip route list default dev "$INTERFACE" 2>/dev/null)" &&
-    echo "${ROUTE%"${ROUTE##*[![:blank:]]}"}"
-}
-
-add_default_route ()
-{
-    get_gateway
-    NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
-    CURRENT_ROUTE="$(get_default_route)" && {
-        is_equal "$CURRENT_ROUTE" "$NEW_ROUTE" || {
-            ip_route del "$CURRENT_ROUTE"
-            false
-        }
-    } || {
-        CURRENT_ROUTE="$NEW_ROUTE"
-        ip_route add  "$NEW_ROUTE"
-    }
 }
 
 check_ping ()
@@ -536,84 +510,13 @@ maintain_route ()
     remove_obsolete_routes || :
 }
 
-select_gateway ()
-{
-    NEW_ROUTE= BEST_BIT= COUNT=1
-    while test "$COUNT" -le "$GATEWAY_NUM"
-    do
-        COUNT="$((COUNT + 1))"
-        TMP_ROUTE="$SPEEDTEST_HOST via $CURRENT_GATEWAY dev $INTERFACE"
-        echo "running speedtest every '$SPEEDTEST_INTERVAL seconds' for a temp route: '$TMP_ROUTE'"
-        ip_route add "$TMP_ROUTE" >/dev/null || return 0
-
-        if speedtest
-        then
-            test "${BEST_BIT:-0}" -ge "$BIT" || {
-                BEST_BIT="$BIT"
-                NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
-            }
-        elif check_ping "$CURRENT_GATEWAY"
-        then
-            echo "host is unavailable: '$SPEEDTEST_HOST'"
-        else
-            echo "gateway is unavailable: '$CURRENT_GATEWAY'"
-        fi
-
-        ip_route del "$TMP_ROUTE" >/dev/null || return 0
-        get_gateway
-    done
-    is_empty "${NEW_ROUTE:-}" ||
-    if CURRENT_ROUTE="$(get_default_route)"
-    then
-        is_equal "$CURRENT_ROUTE" "$NEW_ROUTE" || {
-            echo "switching to a faster route"
-            ip_route del "$ROUTE"
-            ip_route add "$NEW_ROUTE"
-            CURRENT_ROUTE="$NEW_ROUTE"
-        }
-    fi
-}
-
-maintain_route ()
-{
-    echo "the current route: '$CURRENT_ROUTE'"
-
-    if is_not_empty "${PING_HOST:-}"
-    then
-        if check_ping "$PING_HOST"
-        then
-            echo "host is available: '$PING_HOST'"
-            is_equal "$SPEEDTEST" no || {
-                wait_for_speedtest ||
-                is_not_vrrp_master ||
-                    select_gateway || :
-            }
-        else
-            if check_ping "$CURRENT_GATEWAY"
-            then
-                echo "host is unavailable: '$REMOTE_HOST'"
-                false
-            else
-                echo "gateway is unavailable: '$CURRENT_GATEWAY'"
-                false
-            fi
-        fi
-    elif check_ping "$CURRENT_GATEWAY"
-    then
-        echo "gateway is available: '$CURRENT_GATEWAY'"
-    else
-        echo "gateway is unavailable: '$CURRENT_GATEWAY'"
-        false
-    fi || test "$GATEWAY_NUM" -eq 1 || add_default_route
-}
-
 LF="$(printf '\n')"
 POSIX_IFS="$(printf ' \t\n')"
 IFS="$POSIX_IFS"
 
 include_config && set_variables || exit
 trap clean_and_exit HUP INT TERM
-remove_test_route || add_default_route || exit
+remove_test_route || exit
 
 while :
 do
