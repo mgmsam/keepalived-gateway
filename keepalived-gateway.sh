@@ -301,7 +301,7 @@ set_variables ()
 
 ip_route ()
 {
-    EXEC="ip route $1 $2"
+    EXEC="ip route $@"
     $EXEC && echo "$EXEC"
 }
 
@@ -407,7 +407,7 @@ add_route ()
     is_not_empty "${ROUTES:-}" || return
     while read ROUTE
     do
-        ip route replace $ROUTE || :
+        ip_route replace "$ROUTE" || :
     done <<EOF
 $ROUTES
 EOF
@@ -454,7 +454,7 @@ remove_obsolete_routes ()
     is_not_empty "${REMOVE_ROUTES:-}" || return
     while read ROUTE
     do
-        ip route del $ROUTE
+        ip_route del "$ROUTE"
     done <<EOF
 $REMOVE_ROUTES
 EOF
@@ -470,7 +470,7 @@ maintain_route ()
         format_route || continue
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
             SPEEDTEST_ROUTE="$SPEEDTEST_HOST via $GATEWAY dev $INTERFACE"
-            ip route replace $SPEEDTEST_ROUTE
+            ip_route replace "$SPEEDTEST_ROUTE"
 
             if speedtest
             then
@@ -478,18 +478,18 @@ maintain_route ()
                     BEST_BIT="$BIT"
                     ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE"
                 }
-                ip route del $SPEEDTEST_ROUTE
+                ip_route del "$SPEEDTEST_ROUTE"
                 continue
             fi
 
-            ip route del $SPEEDTEST_ROUTE
+            ip_route del "$SPEEDTEST_ROUTE"
             echo "failed to measure speed from '$SPEEDTEST_HOST' via route '$SPEEDTEST_ROUTE'"
         }
 
         if is_not_empty "${PING_HOST:-}"
         then
             PING_ROUTE="$PING_HOST via $GATEWAY dev $INTERFACE"
-            ip route replace $PING_ROUTE
+            ip_route replace "$PING_ROUTE"
 
             check_ping "$PING_HOST" &&
             ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE" || {
@@ -499,7 +499,7 @@ maintain_route ()
                 echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
             }
 
-            ip route del $PING_ROUTE
+            ip_route del "$PING_ROUTE"
         else
             check_ping -I "$INTERFACE" "$GATEWAY" &&
             ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE" ||
