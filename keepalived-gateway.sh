@@ -18,6 +18,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+is_diff ()
+{
+    case "${1:-}" in
+        "${2:-}")
+            return 1
+    esac
+}
+
 is_empty ()
 {
     case "${1:-}" in
@@ -58,70 +66,196 @@ include_config ()
     }
 
     . "$CONFIG_FILE" || return
-
 }
 
-parse_interval ()
+is_interface ()
 {
-    case "${2%[smhdwMy]}" in
-        "" | *[!0123456789]*)
-            echo "variable '$1': invalid value: '$2'"
-            echo "variable '$1': valid value: an integer indicating the number of [s]econds, [m]inutes, [h]ours, [d]ays, [w]eeks, [M]onths and [y]ears"
+    ip link show "$1" >/dev/null 2>&1
+}
+
+set_family_address ()
+{
+    case "${1:-}" in
+        "")
+        ;;
+        *.*)
+            FAMILY=inet
+        ;;
+        *:*)
+            FAMILY=inet6
+        ;;
+        *)
             return 2
         ;;
     esac
-    case "$2" in
-        *m) echo "$((${2%m} * 60))" ;;
-        *h) echo "$((${2%h} * 3600))" ;;
-        *d) echo "$((${2%d} * 86400))" ;;
-        *w) echo "$((${2%w} * 604800))" ;;
-        *M) echo "$((${2%M} * 2678400))" ;;
-        *y) echo "$((${2%y} * 32140800))" ;;
-         *) echo "${2%s}" ;;
-    esac
 }
 
-check_variables ()
+parse_gateway_entry ()
 {
-    case "${GATEWAY_IPS:-}" in
-        *[![:space:],]*)
-            IFS="$IFS,"
-            set -- $GATEWAY_IPS
-            IFS="${IFS%,}"
-            GATEWAY_IPS="$@"
+    IFS="@#_=-"
+    set -- $GATEWAY
+    IFS="$POSIX_IFS"
+
+    case "${1:-}" in
+        *[.:]*)
+            INTERFACE=
+            GATEWAY="$1"
+            METRIC="${2:-}"
         ;;
         *)
-            echo "variable 'GATEWAY_IPS': no valid gateway IPs found"
+            INTERFACE="${1:-}"
+            GATEWAY="${2:-}"
+            METRIC="${3:-}"
+        ;;
+    esac
+
+    case "${GATEWAY:-}" in
+        *[.:]*)
+        ;;
+        *)
+            ERROR="invalid gateway: '$GATEWAY'"
             return 2
         ;;
     esac
 
     case "${INTERFACE:-}" in
         "")
-            echo "variable 'INTERFACE': is empty"
-            return 2
+            is_not_empty "${DEFAULT_INTERFACE:-}" || {
+                ERROR="missing interface for gateway: '$GATEWAY'"
+                return 2
+            }
+            INTERFACE="$DEFAULT_INTERFACE"
         ;;
         *)
-            ip link show "$INTERFACE" >/dev/null 2>&1 || {
-                echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
+            is_interface "$INTERFACE" || {
+                ERROR="network interface not found: '$INTERFACE'"
                 return 2
             }
         ;;
     esac
 
-    CHECK_INTERVAL="$(parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}")" || return
+    case "${METRIC:-}" in
+        "")
+            is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
+        ;;
+        *[!0123456789]*)
+            ERROR="invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
+            return 2
+        ;;
+        0*)
+            METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+        ;;
+    esac
+
+    GATEWAY="$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
+}
+
+optimize_gateways ()
+{
+    GATEWAYS="$(echo "$GATEWAYS" | awk -F'=' '
+        {
+            interface = $1
+            gateway = $2
+            metric = ($3 == "" ? 0 : $3)
+            key = interface "=" gateway
+
+            if (!(key in best_metric) || metric < best_metric[key]) {
+                best_metric[key] = metric
+                pos[key] = $0
+            }
+        }
+        END {
+            for (key in pos) {
+                printf "%010d|%s\n", best_metric[key], pos[key]
+            }
+        }
+    ' | sort -n | cut -d'|' -f2- | tr '\012' ' ' | sed 's/ $//')"
+}
+
+parse_gateway ()
+{
+    GATEWAYS=
+    for GATEWAY
+    do
+        parse_gateway_entry || return
+        GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$GATEWAY"
+    done
+    optimize_gateways
+}
+
+parse_interval ()
+{
+    case "${2%[smhdwMy]}" in
+        "" | *[!0123456789]*)
+            echo "variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
+            return 2
+        ;;
+    esac
+    case "$2" in
+        *m) INTERVAL="$((${2%m} * 60))" ;;
+        *h) INTERVAL="$((${2%h} * 3600))" ;;
+        *d) INTERVAL="$((${2%d} * 86400))" ;;
+        *w) INTERVAL="$((${2%w} * 604800))" ;;
+        *M) INTERVAL="$((${2%M} * 2678400))" ;;
+        *y) INTERVAL="$((${2%y} * 32140800))" ;;
+         *) INTERVAL="${2%s}" ;;
+    esac
+}
+
+set_variables ()
+{
+    is_interface "${INTERFACE:-}" || {
+        echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
+        return 2
+    }
+    DEFAULT_INTERFACE="${INTERFACE:-}"
+
+    case "${METRIC:=0}" in
+        *[!0123456789]*)
+            echo "variable 'METRIC': invalid route metric: '$METRIC'"
+            return 2
+        ;;
+        0*)
+            METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+        ;;
+    esac
+    DEFAULT_METRIC="${METRIC:-}"
+
+    set_family_address "${VIRTUAL_IPADDRESS:-}" || {
+        echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
+        return 2
+    }
+
+    case "${GATEWAYS:-}" in
+        *[![:space:],]*)
+            IFS="$IFS,"
+            set -- $GATEWAYS
+            IFS="$POSIX_IFS"
+            parse_gateway "$@" || {
+                echo "variable 'GATEWAYS': $ERROR"
+                return 2
+            }
+        ;;
+        *)
+            false
+        ;;
+    esac || {
+        echo "variable 'GATEWAYS': no valid gateways found: '$GATEWAYS'"
+        return 2
+    }
+
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}" || return
+    CHECK_INTERVAL="$INTERVAL"
 
     case "${SPEEDTEST:-}" in
-        "" | 0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE])
+        "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
             SPEEDTEST=no
-            return
         ;;
-        1 | [yY] | [yY][eE][sS] | [tT][rR][uU][eE])
+        1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
             SPEEDTEST=yes
         ;;
         *)
-            echo "variable 'SPEEDTEST': invalid value: '$SPEEDTEST'"
-            echo "variable 'SPEEDTEST': valid values: yes or no"
+            echo "variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
             return 2
         ;;
     esac
@@ -137,80 +271,60 @@ check_variables ()
             SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE%[mM]}M"
         ;;
         *)
-            echo "variable 'SPEEDTEST_SCOPE': invalid value: '$SPEEDTEST_SCOPE'"
-            echo "variable 'SPEEDTEST_SCOPE': valid values: 10M, 100M, 1000M, 10000M"
+            echo "variable 'SPEEDTEST_SCOPE': must be '10|100|1000|10000'[M], but got: '$SPEEDTEST_SCOPE'"
             return 2
         ;;
     esac
 
-    SPEEDTEST_INTERVAL="$(parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}")" || return
-    test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
-        echo "Note: Set SPEEDTEST_INTERVAL to $CHECK_INTERVAL, because SPEEDTEST_INTERVAL [$SPEEDTEST_INTERVAL] is less than CHECK_INTERVAL [$CHECK_INTERVAL]"
+    parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
+    SPEEDTEST_INTERVAL="$INTERVAL"
+
+    is_equal "$SPEEDTEST" "no" || {
+        is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
+            test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
+            echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
+        }
+    }
 }
 
 ip_route ()
 {
-    ROUTE="$2"
-    EXEC="ip route $1 $ROUTE"
+    EXEC="ip route $@"
     $EXEC && echo "$EXEC"
 }
 
-del_tmp_route ()
+remove_test_route ()
 {
-    if TMP_ROUTE="$(ip r | grep "^\<${REMOTE_HOST:-}\> via")"
+    if PING_ROUTE="$(ip route list "${PING_HOST:-}")"
     then
-        ip_route del "$TMP_ROUTE" >/dev/null 2>&1
-    fi
+        ip_route del "$PING_ROUTE"
+    fi 2>/dev/null
+
+    if SPEEDTEST_ROUTE="$(ip route list "${SPEEDTEST_HOST:-}")"
+    then
+        ip_route del "$SPEEDTEST_ROUTE"
+    fi 2>/dev/null
 }
 
-cleaning_and_exit ()
+clean_and_exit ()
 {
     RETURN="${RETURN:-0}"
     is_empty "${DLFILE:-}" || rm -f "$DLFILE" || RETURN=$?
-    del_tmp_route || RETURN=$?
+    remove_test_route || RETURN=$?
     exit "$RETURN"
-}
-
-get_gateway ()
-{
-    set -- $GATEWAY_IPS
-    CURRENT_GATEWAY="$1"
-    shift
-    set -- "$@" "$CURRENT_GATEWAY"
-    GATEWAY_IPS="$@"
-    GATEWAY_NUM="$#"
-}
-
-get_default_route ()
-{
-    ROUTE="$(ip r | grep "\<$INTERFACE\>" | grep '\<default\>')" &&
-    echo "${ROUTE%"${ROUTE##*[![:blank:]]}"}"
-}
-
-add_default_route ()
-{
-    get_gateway
-    NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
-    CURRENT_ROUTE="$(get_default_route)" && {
-        is_equal "$CURRENT_ROUTE" "$NEW_ROUTE" || {
-            ip_route del "$CURRENT_ROUTE"
-            false
-        }
-    } || {
-        CURRENT_ROUTE="$NEW_ROUTE"
-        ip_route add  "$NEW_ROUTE"
-    }
 }
 
 check_ping ()
 {
-    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$1" >/dev/null 2>&1
+    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$@" >/dev/null 2>&1
 }
 
-is_master_state_vrrp ()
+is_not_vrrp_master ()
 {
-    is_empty "${VIRTUAL_IPADDRESS:-}" ||
-    ip -o -4 a | grep "\<$VIRTUAL_IPADDRESS\>" >/dev/null 2>&1
+    is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
+        ip -oneline -family "$FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>" &&
+        return 1 || return 0
+    } >/dev/null 2>&1
 }
 
 get_time ()
@@ -218,10 +332,10 @@ get_time ()
     date "+%s"
 }
 
-speedtest_interval_passed ()
+wait_for_speedtest ()
 {
-    is_empty "${END_TEST:-}" ||
-    test "$(($(get_time) - END_TEST))" -ge "$SPEEDTEST_INTERVAL"
+    is_not_empty "${END_TEST:-}" &&
+    test "$(($(get_time) - END_TEST))" -lt "$SPEEDTEST_INTERVAL"
 }
 
 bit2Human ()
@@ -241,86 +355,175 @@ bit2Human ()
 speedtest ()
 {
     DLFILE=$(mktemp /tmp/download.XXXXXX)
-    START_TEST="$(get_time)"
-    timeout 15 wget "http://$REMOTE_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" 2>/dev/null
-    END_TEST="$(get_time)"
-    BYTE="$(awk '{s+=$1} END {print s}' "$DLFILE")"
-    BIT="$((BYTE * 16))"
-    BIT="$((BIT / $((END_TEST - START_TEST))))"
-    SPEED="$(bit2Human "$BIT")/s"
-    rm -f "$DLFILE"
-}
-
-select_gateway ()
-{
-    is_equal "$SPEEDTEST" yes &&
-    is_master_state_vrrp &&
-    speedtest_interval_passed || return 0
-
-    NEW_ROUTE= BEST_BIT= COUNT=1
-    while test "$COUNT" -le "$GATEWAY_NUM"
-    do
-        COUNT="$((COUNT + 1))"
-        TMP_ROUTE="$REMOTE_HOST via $CURRENT_GATEWAY dev $INTERFACE"
-        echo "running speedtest every '$SPEEDTEST_INTERVAL seconds' for a temp route: '$TMP_ROUTE'"
-        ip_route add "$TMP_ROUTE" >/dev/null || return 0
-
-        if check_ping "$REMOTE_HOST"
-        then
-            speedtest
-            echo "route speed: $SPEED"
-            test "${BEST_BIT:-0}" -ge "$BIT" || {
-                BEST_BIT="$BIT"
-                NEW_ROUTE="default via $CURRENT_GATEWAY dev $INTERFACE"
-            }
-        elif check_ping "$CURRENT_GATEWAY"
-        then
-            echo "host is unavailable: '$REMOTE_HOST'"
-        else
-            echo "gateway is unavailable: '$CURRENT_GATEWAY'"
-        fi
-
-        ip_route del "$TMP_ROUTE" >/dev/null || return 0
-        get_gateway
-    done
-    is_empty "${NEW_ROUTE:-}" || is_equal "$(get_default_route)" "$NEW_ROUTE" || {
-        echo "switching to a faster route"
-        ip_route del "$ROUTE"
-        ip_route add "$NEW_ROUTE"
-        CURRENT_ROUTE="$NEW_ROUTE"
+    {
+        START_TEST="$(get_time)"
+        timeout 15 wget "http://$SPEEDTEST_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" || :
+        END_TEST="$(get_time)"
+        BYTE="$(awk '{s+=$1} END {print s}' "$DLFILE")" || :
+        rm -f "$DLFILE" || :
+    } 2>/dev/null
+    is_not_empty "${BYTE:-}" && {
+        BIT="$((BYTE * 16))"
+        BIT="$((BIT / $((END_TEST - START_TEST))))"
+        echo "route speed: $(bit2Human "$BIT")/s"
     }
 }
 
-include_config && check_variables || exit
-trap cleaning_and_exit HUP INT TERM
-del_tmp_route && add_default_route || exit
+format_route ()
+{
+    IFS="="
+    read INTERFACE GATEWAY METRIC <<EOF
+$GATEWAY
+EOF
+    IFS="$POSIX_IFS"
+
+    is_interface "$INTERFACE" || return
+
+    ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:+" metric $METRIC"}"
+    SPEEDTEST_ROUTE="${SPEEDTEST_HOST:-} via $GATEWAY dev $INTERFACE"
+    PING_ROUTE="${PING_HOST:-} via $GATEWAY dev $INTERFACE"
+}
+
+collect_interface ()
+{
+    case " ${IFACES:-} " in
+        *" $INTERFACE "*)
+        ;;
+        *)
+            IFACES="${IFACES:+"$IFACES "}$INTERFACE"
+        ;;
+    esac
+}
+
+add_route ()
+{
+    is_not_empty "${DEFAULT_ROUTES:-}" || return
+    while read ROUTE
+    do
+        ip_route replace "$ROUTE" || :
+    done <<EOF
+$DEFAULT_ROUTES
+EOF
+}
+
+get_current_routes ()
+{
+    CURRENT_ROUTES=
+    for INTERFACE in $IFACES
+    do
+        if ROUTE="$(ip route show default dev "$INTERFACE" 2>/dev/null)"
+        then
+            CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
+        fi
+    done
+}
+
+get_obsolete_routes ()
+{
+    is_not_empty "${CURRENT_ROUTES:-}" || return
+    REMOVE_ROUTES="$(printf "%s\n\n%s" "$DEFAULT_ROUTES" "$CURRENT_ROUTES" | awk '
+        BEGIN {
+            found_separator = 0
+        }
+
+        $0 == "" && found_separator == 0 {
+            found_separator = 1;
+            next
+        }
+
+        !found_separator {
+            wanted[$0] = 1
+            next
+        }
+
+        found_separator && !($0 in wanted) {
+            print $0
+        }
+    ')"
+}
+
+remove_obsolete_routes ()
+{
+    is_not_empty "${REMOVE_ROUTES:-}" || return
+    while read ROUTE
+    do
+        ip_route del "$ROUTE"
+    done <<EOF
+$REMOVE_ROUTES
+EOF
+}
+
+maintain_route ()
+{
+    DEFAULT_ROUTES=""
+    PREV_METRIC=""
+    NEW_ROUTE=""
+    BEST_BIT=0
+    IFACES=""
+
+    for GATEWAY in $GATEWAYS
+    do
+        format_route || continue
+        collect_interface
+
+        is_equal "${METRIC:-0}" "${PREV_METRIC:-0}" || {
+            DEFAULT_ROUTES="$NEW_ROUTE"
+            PREV_METRIC="$METRIC"
+            NEW_ROUTE=""
+            BEST_BIT=0
+        }
+
+        is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
+            ip_route replace "$SPEEDTEST_ROUTE"
+
+            if speedtest
+            then
+                test "$BEST_BIT" -ge "$BIT" || {
+                    NEW_ROUTE="$ROUTE"
+                    BEST_BIT="$BIT"
+                }
+                ip_route del "$SPEEDTEST_ROUTE"
+                continue
+            fi
+
+            ip_route del "$SPEEDTEST_ROUTE"
+            echo "failed to measure speed from '$SPEEDTEST_HOST' via route '$SPEEDTEST_ROUTE'"
+        }
+
+        if is_not_empty "${PING_HOST:-}"
+        then
+            ip_route replace "$PING_ROUTE"
+
+            check_ping -I "$INTERFACE" "$PING_HOST" && NEW_ROUTE="$ROUTE" || {
+                echo "host '$PING_HOST' is unreachable via route '$PING_ROUTE'"
+                check_ping -I "$INTERFACE" "$GATEWAY" &&
+                echo "gateway '$GATEWAY' is reachable on interface '$INTERFACE'" ||
+                echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
+            }
+
+            ip_route del "$PING_ROUTE"
+        else
+            check_ping -I "$INTERFACE" "$GATEWAY" && NEW_ROUTE="$ROUTE" ||
+            echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
+        fi
+    done
+
+    add_route &&
+    get_current_routes &&
+    get_obsolete_routes &&
+    remove_obsolete_routes || :
+}
+
+LF="$(printf '\n')"
+POSIX_IFS="$(printf ' \t\n')"
+IFS="$POSIX_IFS"
+
+include_config && set_variables || exit
+trap clean_and_exit HUP INT TERM
+remove_test_route || exit
 
 while :
 do
-    echo "the current route: '$CURRENT_ROUTE'"
-
-    if is_not_empty "${REMOTE_HOST:-}"
-    then
-        if check_ping "$REMOTE_HOST"
-        then
-            echo "host is available: '$REMOTE_HOST'"
-            test "$GATEWAY_NUM" -eq 1 || select_gateway
-        else
-            if check_ping "$CURRENT_GATEWAY"
-            then
-                echo "host is unavailable: '$REMOTE_HOST'"
-                false
-            else
-                echo "gateway is unavailable: '$CURRENT_GATEWAY'"
-                false
-            fi
-        fi
-    elif check_ping "$CURRENT_GATEWAY"
-    then
-        echo "gateway is available: '$CURRENT_GATEWAY'"
-    else
-        echo "gateway is unavailable: '$CURRENT_GATEWAY'"
-        false
-    fi || test "$GATEWAY_NUM" -eq 1 || add_default_route
+    maintain_route
     sleep "$CHECK_INTERVAL"
 done
