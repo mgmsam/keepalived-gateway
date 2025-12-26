@@ -152,7 +152,7 @@ parse_gateway_entry ()
 
 optimize_gateways ()
 {
-    GATEWAYS="$(echo "$GATEWAYS" | sort -n | awk -F'=' '
+    GATEWAYS="$(echo "$GATEWAYS" | awk -F'=' '
         {
             interface = $1
             gateway = $2
@@ -161,24 +161,15 @@ optimize_gateways ()
 
             if (!(key in best_metric) || metric < best_metric[key]) {
                 best_metric[key] = metric
-                full_record[key] = $0
-                pos[key] = ++global_idx
+                pos[key] = $0
             }
         }
         END {
-            for (k in pos) {
-                sequence[pos[k]] = full_record[k]
-            }
-
-            first = 1
-            for (i = 1; i <= global_idx; i++) {
-                if (i in sequence) {
-                    printf "%s%s", (first ? "" : " "), sequence[i]
-                    first = 0
-                }
+            for (key in pos) {
+                printf "%010d|%s\n", best_metric[key], pos[key]
             }
         }
-    ')"
+    ' | sort -n | cut -d'|' -f2- | tr '\012' ' ' | sed 's/ $//')"
 }
 
 parse_gateway ()
@@ -391,8 +382,13 @@ EOF
 
     is_interface "$INTERFACE" || return
 
-    METRIC="${METRIC:+" metric $METRIC"}"
-    ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:-}"
+    ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:+" metric $METRIC"}"
+    SPEEDTEST_ROUTE="${SPEEDTEST_HOST:-} via $GATEWAY dev $INTERFACE"
+    PING_ROUTE="${PING_HOST:-} via $GATEWAY dev $INTERFACE"
+}
+
+collect_interface ()
+{
     case " ${IFACES:-} " in
         *" $INTERFACE "*)
         ;;
@@ -404,12 +400,12 @@ EOF
 
 add_route ()
 {
-    is_not_empty "${ROUTES:-}" || return
+    is_not_empty "${DEFAULT_ROUTES:-}" || return
     while read ROUTE
     do
         ip_route replace "$ROUTE" || :
     done <<EOF
-$ROUTES
+$DEFAULT_ROUTES
 EOF
 }
 
@@ -428,7 +424,7 @@ get_current_routes ()
 get_obsolete_routes ()
 {
     is_not_empty "${CURRENT_ROUTES:-}" || return
-    REMOVE_ROUTES="$(printf "%s\n\n%s" "$ROUTES" "$CURRENT_ROUTES" | awk '
+    REMOVE_ROUTES="$(printf "%s\n\n%s" "$DEFAULT_ROUTES" "$CURRENT_ROUTES" | awk '
         BEGIN {
             found_separator = 0
         }
@@ -462,21 +458,32 @@ EOF
 
 maintain_route ()
 {
+    DEFAULT_ROUTES=""
+    PREV_METRIC=""
+    NEW_ROUTE=""
     BEST_BIT=0
     IFACES=""
-    ROUTES=""
+
     for GATEWAY in $GATEWAY_IPS
     do
         format_route || continue
+        collect_interface
+
+        is_equal "${METRIC:-0}" "${PREV_METRIC:-0}" || {
+            DEFAULT_ROUTES="$NEW_ROUTE"
+            PREV_METRIC="$METRIC"
+            NEW_ROUTE=""
+            BEST_BIT=0
+        }
+
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
-            SPEEDTEST_ROUTE="$SPEEDTEST_HOST via $GATEWAY dev $INTERFACE"
             ip_route replace "$SPEEDTEST_ROUTE"
 
             if speedtest
             then
                 test "$BEST_BIT" -ge "$BIT" || {
+                    NEW_ROUTE="$ROUTE"
                     BEST_BIT="$BIT"
-                    ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE"
                 }
                 ip_route del "$SPEEDTEST_ROUTE"
                 continue
@@ -488,11 +495,9 @@ maintain_route ()
 
         if is_not_empty "${PING_HOST:-}"
         then
-            PING_ROUTE="$PING_HOST via $GATEWAY dev $INTERFACE"
             ip_route replace "$PING_ROUTE"
 
-            check_ping "$PING_HOST" &&
-            ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE" || {
+            check_ping -I "$INTERFACE" "$PING_HOST" && NEW_ROUTE="$ROUTE" || {
                 echo "host '$PING_HOST' is unreachable via route '$PING_ROUTE'"
                 check_ping -I "$INTERFACE" "$GATEWAY" &&
                 echo "gateway '$GATEWAY' is reachable on interface '$INTERFACE'" ||
@@ -501,8 +506,7 @@ maintain_route ()
 
             ip_route del "$PING_ROUTE"
         else
-            check_ping -I "$INTERFACE" "$GATEWAY" &&
-            ROUTES="${ROUTES:+"$ROUTES$LF"}$ROUTE" ||
+            check_ping -I "$INTERFACE" "$GATEWAY" && NEW_ROUTE="$ROUTE" ||
             echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
         fi
     done
