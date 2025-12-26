@@ -226,24 +226,21 @@ set_variables ()
         return 2
     }
 
-    case "${GATEWAY_IPS:-}" in
+    case "${GATEWAYS:-}" in
         *[![:space:],]*)
             IFS="$IFS,"
-            set -- $GATEWAY_IPS
+            set -- $GATEWAYS
             IFS="$POSIX_IFS"
             parse_gateway "$@" || {
-                echo "variable 'GATEWAY_IPS': $ERROR"
+                echo "variable 'GATEWAYS': $ERROR"
                 return 2
             }
-            is_diff "$#" 1 || SPEEDTEST=no
-            GATEWAY_NUM="$#"
-            GATEWAY_IPS="$GATEWAYS"
         ;;
         *)
             false
         ;;
     esac || {
-        echo "variable 'GATEWAY_IPS': no valid gateways found: '$GATEWAY_IPS'"
+        echo "variable 'GATEWAYS': no valid gateways found: '$GATEWAYS'"
         return 2
     }
 
@@ -255,7 +252,7 @@ set_variables ()
             SPEEDTEST=no
         ;;
         1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
-            is_equal "$GATEWAY_NUM" 1 && SPEEDTEST=no || SPEEDTEST=yes
+            SPEEDTEST=yes
         ;;
         *)
             echo "variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
@@ -464,7 +461,7 @@ maintain_route ()
     BEST_BIT=0
     IFACES=""
 
-    for GATEWAY in $GATEWAY_IPS
+    for GATEWAY in $GATEWAYS
     do
         format_route || continue
         collect_interface
