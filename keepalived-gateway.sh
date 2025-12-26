@@ -152,7 +152,7 @@ parse_gateway_entry ()
 
 optimize_gateways ()
 {
-    GATEWAYS="$(echo "$GATEWAYS" | awk -F'=' '
+    GATEWAYS="$(echo "$GATEWAYS" | sort -n | awk -F'=' '
         {
             interface = $1
             gateway = $2
