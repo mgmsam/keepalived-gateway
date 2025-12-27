@@ -545,10 +545,10 @@ include_config &&
 set_variables &&
 remove_test_route || exit
 
-trap 'clean_and_exit' EXIT
-trap 'clean_and_exit 129' HUP
-trap 'clean_and_exit 130' INT
-trap 'clean_and_exit 131' TERM
+trap 'clean_and_exit' 0       # EXIT (0) : Naturally occurring script termination.
+trap 'clean_and_exit 129' 1   # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
+trap 'clean_and_exit 130' 2   # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
+trap 'clean_and_exit 131' 15  # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
 
 while :
 do
