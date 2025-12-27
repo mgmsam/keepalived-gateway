@@ -536,8 +536,9 @@ maintain_route ()
     remove_obsolete_routes || :
 }
 
-LF="$(printf '\n')"
-POSIX_IFS="$(printf ' \t\n')"
+LF="
+"
+POSIX_IFS="$(printf " \t")$LF"
 IFS="$POSIX_IFS"
 
 check_dependencies &&
