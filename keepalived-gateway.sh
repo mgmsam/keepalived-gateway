@@ -433,11 +433,17 @@ get_current_routes ()
     CURRENT_ROUTES=
     for INTERFACE in $IFACES
     do
-        if ROUTE="$(ip route show default dev "$INTERFACE" 2>/dev/null)"
+        if ROUTES="$(ip route list | grep "^[[:blank:]]*default " | grep "dev $INTERFACE\( \|$\)")"
         then
-            CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
+            while read -r ROUTE
+            do
+                ROUTE=$(echo $ROUTE)
+                CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
+            done <<EOF
+$ROUTES
+EOF
         fi
-    done
+    done 2>/dev/null
 }
 
 get_obsolete_routes ()
@@ -529,6 +535,8 @@ maintain_route ()
             echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
         fi
     done
+
+    is_empty "${NEW_ROUTE:-}" || DEFAULT_ROUTES="$NEW_ROUTE"
 
     add_route &&
     get_current_routes &&
