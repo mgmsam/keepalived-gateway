@@ -260,27 +260,19 @@ set_variables ()
         ;;
     esac
 
-    case "${SPEEDTEST_SCOPE:-}" in
-        "")
-            SPEEDTEST_SCOPE=10M
-        ;;
-        10 | 100 | 1000 |10000)
-            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE}M"
-        ;;
-        10[mM] | 100[mM] | 1000[mM] | 10000[mM])
-            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE%[mM]}M"
-        ;;
-        *)
-            echo "variable 'SPEEDTEST_SCOPE': must be '10|100|1000|10000'[M], but got: '$SPEEDTEST_SCOPE'"
-            return 2
-        ;;
-    esac
-
     parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
     SPEEDTEST_INTERVAL="$INTERVAL"
 
     is_equal "$SPEEDTEST" "no" || {
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
+            SPEEDTEST_URL="$SPEEDTEST_HOST${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+            case "$SPEEDTEST_URL" in
+                http://* | https://*)
+                    ;;
+                *)
+                    SPEEDTEST_URL="http://$SPEEDTEST_URL"
+                    ;;
+            esac
             test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
             echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
         }
@@ -354,17 +346,14 @@ bit2Human ()
 
 speedtest ()
 {
-    DLFILE=$(mktemp /tmp/download.XXXXXX)
-    {
-        START_TEST="$(get_time)"
-        timeout 15 wget "http://$SPEEDTEST_HOST/$SPEEDTEST_SCOPE" -O "$DLFILE" || :
-        END_TEST="$(get_time)"
-        BYTE="$(awk '{s+=$1} END {print s}' "$DLFILE")" || :
-        rm -f "$DLFILE" || :
-    } 2>/dev/null
-    is_not_empty "${BYTE:-}" && {
-        BIT="$((BYTE * 16))"
-        BIT="$((BIT / $((END_TEST - START_TEST))))"
+    START_TEST="$(get_time)"
+    BYTE="$(timeout 15 wget -q -O - "$SPEEDTEST_URL" | wc -c)"
+    END_TEST="$(get_time)"
+    BYTE="$(( ${BYTE:-0} + 0 ))"
+    DURATION=$((END_TEST - START_TEST))
+    test "$DURATION" -gt 0 || DURATION=1
+    test "$BYTE" -gt 1024 && {
+        BIT=$(( (BYTE * 8) / DURATION ))
         echo "route speed: $(bit2Human "$BIT")/s"
     }
 }
@@ -476,7 +465,7 @@ maintain_route ()
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
             ip_route replace "$SPEEDTEST_ROUTE"
 
-            if speedtest
+            if speedtest "$SPEEDTEST_URL"
             then
                 test "$BEST_BIT" -ge "$BIT" || {
                     NEW_ROUTE="$ROUTE"
