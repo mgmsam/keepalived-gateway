@@ -332,16 +332,18 @@ wait_for_speedtest ()
 
 bit2Human ()
 {
-    BIT="${1:-0}" REMAINS='' SIZE=1
-    while test "$BIT" -gt 1000
+    BIT="${1:-0}" REMAINS="" SIZE=1
+    while test "$BIT" -ge 1000
     do
-        REMAINS="$(printf ".%02d" $((BIT % 1000 * 100 / 1000)))"
+        REMAINS=$(( (BIT % 1000) / 10 ))
+        REMAINS=$(printf ".%02d" "$REMAINS")
         BIT=$((BIT / 1000))
         SIZE=$((SIZE + 1))
     done
     set -- bit Kbit Mbit Gbit Tbit Ebit Pbit Zbit Ybit
-    eval SIZE=\$$SIZE
-    echo "$BIT${REMAINS:-} $SIZE"
+    shift $((SIZE - 1))
+    UNIT="$1"
+    echo "$BIT${REMAINS:-} $UNIT"
 }
 
 speedtest ()
