@@ -287,11 +287,23 @@ set_variables ()
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
             SPEEDTEST_URL="$SPEEDTEST_HOST${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
             case "$SPEEDTEST_URL" in
-                http://* | https://*)
-                    ;;
+                http://*)
+                    WGET_OPTIONS="-q -O -"
+                ;;
+                https://*)
+                    if wget --help 2>&1 | grep "\--no-check-certificate" >/dev/null 2>&1
+                    then
+                        WGET_OPTIONS="--no-check-certificate -q -O -"
+                    else
+                        echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
+                        SPEEDTEST_URL="http://${SPEEDTEST_URL#https://}"
+                        WGET_OPTIONS="-q -O -"
+                    fi
+                ;;
                 *)
                     SPEEDTEST_URL="http://$SPEEDTEST_URL"
-                    ;;
+                    WGET_OPTIONS="-q -O -"
+                ;;
             esac
             test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
             echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
@@ -380,7 +392,10 @@ bit2Human ()
 speedtest ()
 {
     START_TEST="$(get_time)"
-    BYTE="$($TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" wget -q -O - "$SPEEDTEST_URL" | wc -c)"
+    BYTE="$(
+        $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
+        wget $WGET_OPTIONS "$SPEEDTEST_URL" | wc -c
+    )"
     END_TEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
     DURATION=$((END_TEST - START_TEST))
