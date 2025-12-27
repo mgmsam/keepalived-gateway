@@ -339,7 +339,7 @@ clean_and_exit ()
 
 check_ping ()
 {
-    ping -W "${TIMEOUT:=3}" -c "${COUNT_REPLIES:=3}" "$@" >/dev/null 2>&1
+    ping -W "${PING_TIMEOUT:=3}" -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
 }
 
 is_not_vrrp_master ()
@@ -380,7 +380,7 @@ bit2Human ()
 speedtest ()
 {
     START_TEST="$(get_time)"
-    BYTE="$($TIMEOUT wget -q -O - "$SPEEDTEST_URL" | wc -c)"
+    BYTE="$($TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" wget -q -O - "$SPEEDTEST_URL" | wc -c)"
     END_TEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
     DURATION=$((END_TEST - START_TEST))
