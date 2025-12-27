@@ -307,13 +307,11 @@ ip_route ()
 
 remove_test_route ()
 {
-    RETURN=0
-
     is_empty "${PING_HOST:-}" || {
         while read -r ROUTE
         do
             is_not_empty "${ROUTE:-}" || continue
-            ip_route del $ROUTE || RETURN=1
+            ip_route del $ROUTE || RETURN=$?
         done <<EOF
 $(ip route list "$PING_HOST")
 EOF
@@ -323,20 +321,20 @@ EOF
         while read -r ROUTE
         do
             is_not_empty "${ROUTE:-}" || continue
-            ip_route del $ROUTE || RETURN=1
+            ip_route del $ROUTE || RETURN=$?
         done <<EOF
 $(ip route list "$SPEEDTEST_HOST")
 EOF
     }
-
-    return "$RETURN"
+    return "${RETURN:=0}"
 }
 
 clean_and_exit ()
 {
-    RETURN="${RETURN:-0}"
+    EXIT="${1:-$?}"
+    trap - EXIT
     remove_test_route || RETURN=$?
-    exit "$RETURN"
+    is_equal "${EXIT:-}" 0 && exit "$RETURN" || exit "$EXIT"
 }
 
 check_ping ()
@@ -542,9 +540,15 @@ LF="$(printf '\n')"
 POSIX_IFS="$(printf ' \t\n')"
 IFS="$POSIX_IFS"
 
-check_dependencies && include_config && set_variables || exit
-trap clean_and_exit HUP INT TERM EXIT
+check_dependencies &&
+include_config &&
+set_variables &&
 remove_test_route || exit
+
+trap 'clean_and_exit' EXIT
+trap 'clean_and_exit 129' HUP
+trap 'clean_and_exit 130' INT
+trap 'clean_and_exit 131' TERM
 
 while :
 do
