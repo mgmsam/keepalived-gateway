@@ -307,21 +307,34 @@ ip_route ()
 
 remove_test_route ()
 {
-    if PING_ROUTE="$(ip route list "${PING_HOST:-}")"
-    then
-        ip_route del "$PING_ROUTE"
-    fi 2>/dev/null
+    RETURN=0
 
-    if SPEEDTEST_ROUTE="$(ip route list "${SPEEDTEST_HOST:-}")"
-    then
-        ip_route del "$SPEEDTEST_ROUTE"
-    fi 2>/dev/null
+    is_empty "${PING_HOST:-}" || {
+        while read -r ROUTE
+        do
+            is_not_empty "${ROUTE:-}" || continue
+            ip_route del $ROUTE || RETURN=1
+        done <<EOF
+$(ip route list "$PING_HOST")
+EOF
+    }
+
+    is_empty "${SPEEDTEST_HOST:-}" || {
+        while read -r ROUTE
+        do
+            is_not_empty "${ROUTE:-}" || continue
+            ip_route del $ROUTE || RETURN=1
+        done <<EOF
+$(ip route list "$SPEEDTEST_HOST")
+EOF
+    }
+
+    return "$RETURN"
 }
 
 clean_and_exit ()
 {
     RETURN="${RETURN:-0}"
-    is_empty "${DLFILE:-}" || rm -f "$DLFILE" || RETURN=$?
     remove_test_route || RETURN=$?
     exit "$RETURN"
 }
@@ -530,7 +543,7 @@ POSIX_IFS="$(printf ' \t\n')"
 IFS="$POSIX_IFS"
 
 check_dependencies && include_config && set_variables || exit
-trap clean_and_exit HUP INT TERM
+trap clean_and_exit HUP INT TERM EXIT
 remove_test_route || exit
 
 while :
