@@ -212,12 +212,12 @@ parse_interval ()
         ;;
     esac
     case "$2" in
-        *m) INTERVAL="$((${2%m} * 60))" ;;
-        *h) INTERVAL="$((${2%h} * 3600))" ;;
-        *d) INTERVAL="$((${2%d} * 86400))" ;;
-        *w) INTERVAL="$((${2%w} * 604800))" ;;
-        *M) INTERVAL="$((${2%M} * 2678400))" ;;
-        *y) INTERVAL="$((${2%y} * 32140800))" ;;
+        *m) INTERVAL=$((${2%m} * 60)) ;;
+        *h) INTERVAL=$((${2%h} * 3600)) ;;
+        *d) INTERVAL=$((${2%d} * 86400)) ;;
+        *w) INTERVAL=$((${2%w} * 604800)) ;;
+        *M) INTERVAL=$((${2%M} * 2678400)) ;;
+        *y) INTERVAL=$((${2%y} * 32140800)) ;;
          *) INTERVAL="${2%s}" ;;
     esac
 }
@@ -358,7 +358,7 @@ get_time ()
 wait_for_speedtest ()
 {
     is_not_empty "${END_TEST:-}" &&
-    test "$(($(get_time) - END_TEST))" -lt "$SPEEDTEST_INTERVAL"
+    test $(( $(get_time) - END_TEST )) -lt "$SPEEDTEST_INTERVAL"
 }
 
 bit2Human ()
@@ -382,7 +382,7 @@ speedtest ()
     START_TEST="$(get_time)"
     BYTE="$($TIMEOUT wget -q -O - "$SPEEDTEST_URL" | wc -c)"
     END_TEST="$(get_time)"
-    BYTE="$(( ${BYTE:-0} + 0 ))"
+    BYTE=$(( ${BYTE:-0} + 0 ))
     DURATION=$((END_TEST - START_TEST))
     test "$DURATION" -gt 0 || DURATION=1
     test "$BYTE" -gt 1024 && {
