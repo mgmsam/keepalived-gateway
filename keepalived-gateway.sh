@@ -56,6 +56,26 @@ is_file ()
     test -f "${1:-}"
 }
 
+check_dependencies ()
+{
+    RETURN=0
+    for COMMAND in awk cut date ip grep ping sed sleep sort timeout tr wc wget
+    do
+        type "$COMMAND" >/dev/null 2>&1 || {
+            echo "dependency not found: '$COMMAND'" >&2
+            RETURN=1
+        }
+    done
+    is_equal "$RETURN" 0 || return "$RETURN"
+
+    if timeout -t 1 sleep 0 >/dev/null 2>&1
+    then
+        TIMEOUT="timeout -t"
+    else
+        TIMEOUT="timeout"
+    fi
+}
+
 include_config ()
 {
     CONFIG_FILE="/etc/keepalived-gateway.conf"
@@ -349,7 +369,7 @@ bit2Human ()
 speedtest ()
 {
     START_TEST="$(get_time)"
-    BYTE="$(timeout 15 wget -q -O - "$SPEEDTEST_URL" | wc -c)"
+    BYTE="$($TIMEOUT wget -q -O - "$SPEEDTEST_URL" | wc -c)"
     END_TEST="$(get_time)"
     BYTE="$(( ${BYTE:-0} + 0 ))"
     DURATION=$((END_TEST - START_TEST))
@@ -509,7 +529,7 @@ LF="$(printf '\n')"
 POSIX_IFS="$(printf ' \t\n')"
 IFS="$POSIX_IFS"
 
-include_config && set_variables || exit
+check_dependencies && include_config && set_variables || exit
 trap clean_and_exit HUP INT TERM
 remove_test_route || exit
 
