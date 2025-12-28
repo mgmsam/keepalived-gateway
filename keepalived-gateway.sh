@@ -432,6 +432,11 @@ collect_interface ()
     esac
 }
 
+collect_route ()
+{
+    DEFAULT_ROUTES="${DEFAULT_ROUTES:+"$DEFAULT_ROUTES$LF"}$NEW_ROUTE"
+}
+
 add_route ()
 {
     is_not_empty "${DEFAULT_ROUTES:-}" || return
@@ -510,7 +515,7 @@ maintain_route ()
         collect_interface
 
         is_equal "${METRIC:-0}" "${PREV_METRIC:-0}" || {
-            DEFAULT_ROUTES="$NEW_ROUTE"
+            collect_route
             PREV_METRIC="$METRIC"
             NEW_ROUTE=""
             BEST_BIT=0
@@ -552,7 +557,7 @@ maintain_route ()
     done
 
     LAST_SPEEDTEST="${END_SPEEDTEST:-}"
-    is_empty "${NEW_ROUTE:-}" || DEFAULT_ROUTES="$NEW_ROUTE"
+    is_empty "${NEW_ROUTE:-}" || collect_route
 
     add_route &&
     get_current_routes &&
