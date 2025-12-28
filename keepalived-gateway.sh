@@ -369,8 +369,8 @@ get_time ()
 
 wait_for_speedtest ()
 {
-    is_not_empty "${END_TEST:-}" &&
-    test $(( $(get_time) - END_TEST )) -lt "$SPEEDTEST_INTERVAL"
+    is_not_empty "${LAST_SPEEDTEST:-}" &&
+    test $(( $(get_time) - LAST_SPEEDTEST )) -lt "$SPEEDTEST_INTERVAL"
 }
 
 bit2Human ()
@@ -391,14 +391,14 @@ bit2Human ()
 
 speedtest ()
 {
-    START_TEST="$(get_time)"
+    START_SPEEDTEST="$(get_time)"
     BYTE="$(
         $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
         wget $WGET_OPTIONS "$SPEEDTEST_URL" | wc -c
     )"
-    END_TEST="$(get_time)"
+    END_SPEEDTEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
-    DURATION=$((END_TEST - START_TEST))
+    DURATION=$((END_SPEEDTEST - START_SPEEDTEST))
     test "$DURATION" -gt 0 || DURATION=1
     test "$BYTE" -gt 1024 && {
         BIT=$(( (BYTE * 8) / DURATION ))
@@ -551,6 +551,7 @@ maintain_route ()
         fi
     done
 
+    LAST_SPEEDTEST="${END_SPEEDTEST:-}"
     is_empty "${NEW_ROUTE:-}" || DEFAULT_ROUTES="$NEW_ROUTE"
 
     add_route &&
