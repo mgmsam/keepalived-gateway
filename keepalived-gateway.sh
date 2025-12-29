@@ -59,7 +59,7 @@ is_file ()
 check_dependencies ()
 {
     RETURN=0
-    for COMMAND in awk cut date ip grep ping sed sleep sort timeout tr wc wget
+    for COMMAND in awk cut date ip ping sed sleep sort timeout tr wc wget
     do
         type "$COMMAND" >/dev/null 2>&1 || {
             echo "dependency not found: '$COMMAND'" >&2
@@ -215,14 +215,16 @@ get_local_ip ()
             set -- "inet6?" ${2:-}
         ;;
     esac
-    ip address show | awk '$1 ~ /^'"$1"'$/ {
-        if ("'"${2:-}"'" == "mask") {
-            print $2
-        } else {
-            split($2, ip, "/")
-            print ip[1]
+    ip address show | awk '
+        $1 ~ /^'"$1"'$/ {
+            if ("'"${2:-}"'" == "mask") {
+                print $2
+            } else {
+                split($2, ip, "/")
+                print ip[1]
+            }
         }
-    }'
+    '
 }
 
 is_local_ip ()
@@ -232,12 +234,22 @@ is_local_ip ()
             return 1
         ;;
         */*)
-            get_local_ip "${2:-}" mask | grep "^$1$" >/dev/null 2>&1
+            set -- "$1" "${2:-}" mask
         ;;
         *)
-            get_local_ip "${2:-}" | grep "^$1$" >/dev/null 2>&1
+            set -- "$1" "${2:-}"
         ;;
     esac
+    get_local_ip "${2:-}" ${3:-} | awk '
+        $0 == "'"$1"'" {
+            found = "yes"
+            exit
+        }
+        END {
+            if (found == "yes") exit 0
+            exit 1
+        }
+    '
 }
 
 optimize_gateways ()
@@ -341,9 +353,9 @@ resolve_ips ()
 {
     nslookup "$1" 2>/dev/null | awk '
         /^Name:/ {
-            found=1
+            found = "yes"
         }
-        found && /^Address[ 0-9]*:/ {
+        found == "yes" && /^Address[ 0-9]*:/ {
             addr = $NF
             if (addr ~ /\./ && !v4) {
                 v4 = addr
@@ -514,13 +526,15 @@ set_variables ()
             WGET_OPTIONS="-q -O -"
             case "${SCHEME:-}" in
                 https)
-                    if wget --help 2>&1 | grep "\--no-check-certificate" >/dev/null 2>&1
-                    then
-                        WGET_OPTIONS="--no-check-certificate $WGET_OPTIONS"
-                    else
-                        echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
-                        SCHEME=http
-                    fi
+                    case "$(wget --help 2>&1)" in
+                        *"--no-check-certificate"*)
+                            WGET_OPTIONS="--no-check-certificate $WGET_OPTIONS"
+                        ;;
+                        *)
+                            echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
+                            SCHEME=http
+                        ;;
+                    esac
                 ;;
                 "")
                     SCHEME=http
@@ -751,7 +765,21 @@ get_current_routes ()
     CURRENT_ROUTES=
     for INTERFACE in $IFACES
     do
-        if ROUTES="$(ip route list | grep "^[[:blank:]]*default " | grep "dev $INTERFACE\( \|$\)")"
+        if ROUTES="$(ip route show | awk '
+            $1 == "default" {
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "dev" && $(i+1) == "'"$INTERFACE"'") {
+                        print $0
+                        found = "yes"
+                        break
+                    }
+                }
+            }
+            END {
+                if (found == "yes") exit 0
+                exit 1
+            }
+        ')"
         then
             while read -r ROUTE
             do
@@ -769,20 +797,20 @@ get_obsolete_routes ()
     is_not_empty "${CURRENT_ROUTES:-}" || return
     REMOVE_ROUTES="$(printf "%s\n\n%s" "$DEFAULT_ROUTES" "$CURRENT_ROUTES" | awk '
         BEGIN {
-            found_separator = 0
+            found_separator = "no"
         }
 
         $0 == "" && found_separator == 0 {
-            found_separator = 1;
+            found_separator = "yes"
             next
         }
 
-        !found_separator {
-            wanted[$0] = 1
+        found_separator == "no" {
+            wanted[$0] = "yes"
             next
         }
 
-        found_separator && !($0 in wanted) {
+        found_separator == "yes" && !($0 in wanted) {
             print $0
         }
     ')"
