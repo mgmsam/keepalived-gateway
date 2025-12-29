@@ -59,7 +59,7 @@ is_file ()
 check_dependencies ()
 {
     RETURN=0
-    for COMMAND in awk date ip ping sleep timeout wc wget
+    for COMMAND in awk date ip ping sleep timeout wc
     do
         type "$COMMAND" >/dev/null 2>&1 || {
             echo "dependency not found: '$COMMAND'" >&2
@@ -546,21 +546,53 @@ set_variables ()
                 return 2
             }
 
-            WGET_OPTIONS="-q -O -"
-            case "${SCHEME:-}" in
-                https)
-                    case "$(wget --help 2>&1)" in
-                        *"--no-check-certificate"*)
-                            WGET_OPTIONS="--no-check-certificate $WGET_OPTIONS"
+            for DOWNLOAD_CMD in wget curl
+            do
+                type "$DOWNLOAD_CMD" >/dev/null 2>&1 && break || DOWNLOAD_CMD=""
+            done
+
+            case "${DOWNLOAD_CMD:-}" in
+                "")
+                    echo "Error: Speedtest requires 'wget' or 'curl', but neither was found." >&2
+                    return 2
+                ;;
+                wget)
+                    DOWNLOAD_OPTIONS="-q -O -"
+                    case "${SCHEME:-}" in
+                        https)
+                            case "$(wget --help 2>&1)" in
+                                *"--no-check-certificate"*)
+                                    DOWNLOAD_OPTIONS="--no-check-certificate $DOWNLOAD_OPTIONS"
+                                ;;
+                                *)
+                                    echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
+                                    SCHEME=http
+                                ;;
+                            esac
                         ;;
-                        *)
-                            echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
+                        "")
                             SCHEME=http
                         ;;
                     esac
                 ;;
-                "")
-                    SCHEME=http
+                curl)
+                    DOWNLOAD_OPTIONS="-s -L -o -"
+                    case "${SCHEME:-}" in
+                        https)
+                            case "$(curl --help all 2>&1 || curl --help 2>&1)" in
+                                *"-k"* | *"--insecure"*)
+                                    DOWNLOAD_OPTIONS="-k $DOWNLOAD_OPTIONS"
+                                ;;
+                                *)
+                                    echo "Warning: HTTPS speedtest requested, but curl lacks SSL support. Switching to HTTP."
+                                    SCHEME=http
+                                ;;
+                            esac
+                        ;;
+                        "")
+                            SCHEME=http
+                        ;;
+                    esac
                 ;;
             esac
 
@@ -713,7 +745,7 @@ speedtest ()
     START_SPEEDTEST="$(get_time)"
     BYTE="$(
         $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
-        wget $WGET_INET $WGET_OPTIONS "$SPEEDTEST_URL" | wc -c
+        $DOWNLOAD_CMD $DOWNLOAD_INET $DOWNLOAD_OPTIONS "$SPEEDTEST_URL" | wc -c
     )"
     END_SPEEDTEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
@@ -740,14 +772,14 @@ EOF
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV6:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
             PING_IP="${PING_IPV6:-}"
-            WGET_INET="-6"
+            DOWNLOAD_INET="-6"
         ;;
         *)
             IP_ROUTE="ip -4"
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV4:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
             PING_IP="${PING_IPV4:-}"
-            WGET_INET="-4"
+            DOWNLOAD_INET="-4"
         ;;
     esac
 
