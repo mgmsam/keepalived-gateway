@@ -93,19 +93,19 @@ is_interface ()
     ip link show "$1" >/dev/null 2>&1
 }
 
-set_family_address ()
+get_family_address ()
 {
     case "${1:-}" in
         "")
         ;;
+        *:*:*)
+            FAMILY=inet6
+        ;;
         *.*)
             FAMILY=inet
         ;;
-        *:*)
-            FAMILY=inet6
-        ;;
         *)
-            return 2
+            return 1
         ;;
     esac
 }
@@ -166,8 +166,69 @@ parse_gateway_entry ()
             METRIC="${METRIC#"${METRIC%%[!0]*}"}"
         ;;
     esac
+}
 
-    GATEWAY="$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
+is_valid_ip ()
+{
+    case "${1:-}" in
+        *.*.*.*)
+            IFS="."
+            set -- $1
+            IFS="$POSIX_IFS"
+            is_equal $# 4 || return 1
+            for OCTET
+            do
+                case "$OCTET" in
+                    [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
+                    ;;
+                    *)
+                        return 1
+                    ;;
+                esac
+            done
+            FAMILY="inet"
+        ;;
+        *:*:*)
+            case "$1" in
+                *[!0-9a-fA-F:]*)
+                    return 1
+                ;;
+            esac
+            FAMILY="inet6"
+        ;;
+        *)
+            return 1
+        ;;
+    esac
+}
+
+get_local_ip ()
+{
+    ip address show | case "${1:-}" in
+        -4 | 4 | inet)
+            awk '$1 == "inet"  {
+                split($2, ip, "/")
+                print ip[1]
+            }'
+        ;;
+        -6 | 6 | inet6)
+            awk '$1 == "inet6" {
+                split($2, ip, "/")
+                print ip[1]
+            }'
+        ;;
+        *)
+            awk '$1 == "inet" || $1 == "inet6" {
+                split($2, ip, "/")
+                print ip[1]
+            }'
+        ;;
+    esac
+}
+
+is_local_ip ()
+{
+    get_local_ip "$1" | grep "^$2$" >/dev/null 2>&1
 }
 
 optimize_gateways ()
@@ -194,12 +255,57 @@ optimize_gateways ()
 
 parse_gateway ()
 {
-    GATEWAYS=
+    GATEWAYS= RETURN=0
     for GATEWAY
     do
         parse_gateway_entry || return
-        GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$GATEWAY"
+
+        is_valid_ip "$GATEWAY" || {
+            echo "Error: Gateway is not a valid IP address: '$GATEWAY'"
+            RETURN=2
+            continue
+        }
+
+        if is_local_ip "$FAMILY" "$GATEWAY"
+        then
+            echo "Error: Gateway is a local address on this host: '$GATEWAY'"
+            RETURN=2
+            continue
+        fi
+
+        is_empty "${PING_HOST:-}" || {
+            case "$FAMILY" in
+                inet)
+                    is_not_empty "${PING_IPV4:-}"
+                ;;
+                inet6)
+                    is_not_empty "${PING_IPV6:-}"
+                ;;
+            esac || {
+                echo "Error: Gateway '$GATEWAY' is '$FAMILY', but PING_HOST has no '$FAMILY' address."
+                RETURN=2
+                continue
+            }
+        }
+
+        is_empty "${SPEEDTEST_HOST:-}" || {
+            case "$FAMILY" in
+                inet)
+                    is_not_empty "${SPEEDTEST_IPV4:-}"
+                ;;
+                inet6)
+                    is_not_empty "${SPEEDTEST_IPV6:-}"
+                ;;
+            esac || {
+                echo "Error: Gateway '$GATEWAY' is '$FAMILY', but SPEEDTEST_HOST has no '$FAMILY' address."
+                RETURN=2
+                continue
+            }
+        }
+
+        GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
     done
+    is_equal "$RETURN" 0 || return "$RETURN"
     optimize_gateways
 }
 
@@ -222,6 +328,108 @@ parse_interval ()
     esac
 }
 
+resolve_ips ()
+{
+    nslookup "$1" 2>/dev/null | awk '
+        /^Name:/ {
+            found=1
+        }
+        found && /^Address[ 0-9]*:/ {
+            addr = $NF
+            if (addr ~ /\./ && !v4) {
+                v4 = addr
+            }
+            if (addr ~ /:/ && !v6)  {
+                v6 = addr
+            }
+        }
+        END {
+            printf "%s,%s", v4, v6
+        }
+    '
+}
+
+parse_resource ()
+{
+    SCHEME="" USER_INFO="" USER="" PASS="" AUTHORITY="" PORT="" RESOURCE="" IPV4="" IPV6=""
+    HOST="$1"
+    HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
+    HOST="${HOST%"${HOST##*[![:blank:]]}"}"
+    case "$HOST" in
+        *://*)
+            SCHEME="${HOST%%://*}"
+            HOST="${HOST#*://}"
+            HOST="${HOST#"${HOST%%[!/]*}"}"
+        ;;
+    esac
+    case "$HOST" in
+        */*)
+            AUTHORITY="${HOST%%/*}"
+            RESOURCE="${HOST#*/}"
+        ;;
+        *)
+            AUTHORITY="$HOST"
+            RESOURCE=""
+        ;;
+    esac
+    case "$AUTHORITY" in
+        *@*)
+            USER_INFO="${AUTHORITY%@*}"
+            AUTHORITY="${AUTHORITY##*@}"
+            case "$USER_INFO" in
+                *:*)
+                    USER="${USER_INFO%%:*}"
+                    PASS="${USER_INFO#*:}"
+                ;;
+                *)
+                    USER="$USER_INFO"
+                ;;
+            esac
+        ;;
+    esac
+    case "$AUTHORITY" in
+        *]:*)
+            HOST="${AUTHORITY%]*}"
+            HOST="${HOST#[}"
+            PORT="${AUTHORITY##*:}"
+        ;;
+        *]*)
+            HOST="${AUTHORITY#[}"
+            HOST="${HOST%]}"
+        ;;
+        *:*)
+            case "${AUTHORITY%:*}" in
+                *:*)
+                    HOST="$AUTHORITY"
+                ;;
+                *)
+                    HOST="${AUTHORITY%:*}"
+                    PORT="${AUTHORITY##*:}"
+                ;;
+            esac
+        ;;
+        *)
+            HOST="$AUTHORITY"
+        ;;
+    esac
+    case "${HOST:-}" in
+        "")
+            return 1
+        ;;
+        *:*:*)
+            IPV6="$HOST"
+        ;;
+        *[a-zA-Z]*)
+            IPV6="$(resolve_ips "$HOST")"
+            IPV4="${IPV6%%,*}"
+            IPV6="${IPV6#*,}"
+        ;;
+        *)
+            IPV4="$HOST"
+        ;;
+    esac
+}
+
 set_variables ()
 {
     is_interface "${INTERFACE:-}" || {
@@ -241,26 +449,8 @@ set_variables ()
     esac
     DEFAULT_METRIC="${METRIC:-}"
 
-    set_family_address "${VIRTUAL_IPADDRESS:-}" || {
+    get_family_address "${VIRTUAL_IPADDRESS:-}" && VIRTUAL_IPADDRESS_FAMILY="$FAMILY" || {
         echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
-        return 2
-    }
-
-    case "${GATEWAYS:-}" in
-        *[![:space:],]*)
-            IFS="$IFS,"
-            set -- $GATEWAYS
-            IFS="$POSIX_IFS"
-            parse_gateway "$@" || {
-                echo "variable 'GATEWAYS': $ERROR"
-                return 2
-            }
-        ;;
-        *)
-            false
-        ;;
-    esac || {
-        echo "variable 'GATEWAYS': no valid gateways found: '$GATEWAYS'"
         return 2
     }
 
@@ -283,61 +473,131 @@ set_variables ()
     parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
     SPEEDTEST_INTERVAL="$INTERVAL"
 
+    is_empty "${PING_HOST:-}" || {
+        parse_resource "$PING_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
+            echo "Error: Failed to resolve PING_HOST IP."
+            return 2
+        }
+        PING_IPV4="${IPV4:-}"
+        PING_IPV6="${IPV6:-}"
+    }
+
     is_equal "$SPEEDTEST" "no" || {
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
-            SPEEDTEST_URL="$SPEEDTEST_HOST${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-            case "$SPEEDTEST_URL" in
-                http://*)
-                    WGET_OPTIONS="-q -O -"
-                ;;
-                https://*)
+            parse_resource "$SPEEDTEST_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
+                echo "Error: Failed to resolve SPEEDTEST_HOST IP."
+                return 2
+            }
+
+            WGET_OPTIONS="-q -O -"
+            case "${SCHEME:-}" in
+                https)
                     if wget --help 2>&1 | grep "\--no-check-certificate" >/dev/null 2>&1
                     then
-                        WGET_OPTIONS="--no-check-certificate -q -O -"
+                        WGET_OPTIONS="--no-check-certificate $WGET_OPTIONS"
                     else
                         echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
-                        SPEEDTEST_URL="http://${SPEEDTEST_URL#https://}"
-                        WGET_OPTIONS="-q -O -"
+                        SCHEME=http
                     fi
                 ;;
-                *)
-                    SPEEDTEST_URL="http://$SPEEDTEST_URL"
-                    WGET_OPTIONS="-q -O -"
+                "")
+                    SCHEME=http
                 ;;
             esac
+
+            case "${PORT:-}" in
+                "")
+                    SPEEDTEST_AUTHORITY_IPV4="${IPV4:+"$HOST"}"
+                    SPEEDTEST_AUTHORITY_IPV6="${IPV6:+"$HOST"}"
+                ;;
+                *[!0-9]*)
+                    echo "Error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
+                    return 2
+                ;;
+                *)
+                    SPEEDTEST_HOST_IPV4="${IPV4:+"$HOST:$PORT"}"
+                    is_equal "$HOST" "${IPV6:-}" &&
+                    SPEEDTEST_HOST_IPV6="${IPV6:+"[$HOST]:$PORT"}" ||
+                    SPEEDTEST_HOST_IPV4="${IPV6:+"$HOST:$PORT"}"
+                ;;
+            esac
+
+            RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+            SPEEDTEST_URL_IPV4="${IPV4:+${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$SPEEDTEST_AUTHORITY_IPV4${RESOURCE:-}}"
+            SPEEDTEST_URL_IPV6="${IPV6:+${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$SPEEDTEST_AUTHORITY_IPV6${RESOURCE:-}}"
+            SPEEDTEST_IPV4="${IPV4:-}"
+            SPEEDTEST_IPV6="${IPV6:-}"
+
             test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
             echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
         }
+    }
+
+    case "${GATEWAYS:-}" in
+        *[![:space:],]*)
+            IFS="$IFS,"
+            set -- $GATEWAYS
+            IFS="$POSIX_IFS"
+            parse_gateway "$@" || {
+                echo "variable 'GATEWAYS': $ERROR"
+                return 2
+            }
+        ;;
+        *)
+            false
+        ;;
+    esac || {
+        echo "variable 'GATEWAYS': no valid gateways found: '$GATEWAYS'"
+        return 2
     }
 }
 
 ip_route ()
 {
-    EXEC="ip route $@"
+    EXEC="$IP_ROUTE route $@"
     $EXEC && echo "$EXEC"
 }
 
 remove_test_route ()
 {
     is_empty "${PING_HOST:-}" || {
+        IP_ROUTE="ip -4"
         while read -r ROUTE
         do
             is_not_empty "${ROUTE:-}" || continue
             ip_route del $ROUTE || RETURN=$?
         done <<EOF
-$(ip route list "$PING_HOST")
+${PING_IPV4:+"$(ip route show "$PING_IPV4")"}
+EOF
+        IP_ROUTE="ip -6"
+        while read -r ROUTE
+        do
+            is_not_empty "${ROUTE:-}" || continue
+            ip_route del $ROUTE || RETURN=$?
+        done <<EOF
+${PING_IPV6:+"$(ip route show "$PING_IPV6")"}
 EOF
     }
 
     is_empty "${SPEEDTEST_HOST:-}" || {
+        IP_ROUTE="ip -4"
         while read -r ROUTE
         do
             is_not_empty "${ROUTE:-}" || continue
             ip_route del $ROUTE || RETURN=$?
         done <<EOF
-$(ip route list "$SPEEDTEST_HOST")
+${SPEEDTEST_IPV4:+"$(ip route show "$SPEEDTEST_IPV4")"}
+EOF
+        IP_ROUTE="ip -6"
+        while read -r ROUTE
+        do
+            is_not_empty "${ROUTE:-}" || continue
+            ip_route del $ROUTE || RETURN=$?
+        done <<EOF
+${SPEEDTEST_IPV6:+"$(ip route show "$SPEEDTEST_IPV6")"}
 EOF
     }
+
     return "${RETURN:=0}"
 }
 
@@ -357,7 +617,7 @@ check_ping ()
 is_not_vrrp_master ()
 {
     is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
-        ip -oneline -family "$FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>" &&
+        ip -oneline -family "$VIRTUAL_IPADDRESS_FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>" &&
         return 1 || return 0
     } >/dev/null 2>&1
 }
@@ -394,7 +654,7 @@ speedtest ()
     START_SPEEDTEST="$(get_time)"
     BYTE="$(
         $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
-        wget $WGET_OPTIONS "$SPEEDTEST_URL" | wc -c
+        wget $WGET_INET $WGET_OPTIONS "$SPEEDTEST_URL" | wc -c
     )"
     END_SPEEDTEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
@@ -415,10 +675,26 @@ EOF
     IFS="$POSIX_IFS"
 
     is_interface "$INTERFACE" || return
+    case "$GATEWAY" in
+        *:*)
+            IP_ROUTE="ip -6"
+            SPEEDTEST_URL="${SPEEDTEST_URL_IPV6:-}"
+            SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
+            PING_IP="${PING_IPV6:-}"
+            WGET_INET="-6"
+        ;;
+        *)
+            IP_ROUTE="ip -4"
+            SPEEDTEST_URL="${SPEEDTEST_URL_IPV4:-}"
+            SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
+            PING_IP="${PING_IPV4:-}"
+            WGET_INET="-4"
+        ;;
+    esac
 
     ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:+" metric $METRIC"}"
-    SPEEDTEST_ROUTE="${SPEEDTEST_HOST:-} via $GATEWAY dev $INTERFACE"
-    PING_ROUTE="${PING_HOST:-} via $GATEWAY dev $INTERFACE"
+    SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY dev $INTERFACE"
+    PING_ROUTE="${PING_IP:-} via $GATEWAY dev $INTERFACE"
 }
 
 collect_interface ()
@@ -542,7 +818,7 @@ maintain_route ()
         then
             ip_route replace "$PING_ROUTE"
 
-            check_ping -I "$INTERFACE" "$PING_HOST" && NEW_ROUTE="$ROUTE" || {
+            check_ping -I "$INTERFACE" "$PING_IP" && NEW_ROUTE="$ROUTE" || {
                 echo "host '$PING_HOST' is unreachable via route '$PING_ROUTE'"
                 check_ping -I "$INTERFACE" "$GATEWAY" &&
                 echo "gateway '$GATEWAY' is reachable on interface '$INTERFACE'" ||
