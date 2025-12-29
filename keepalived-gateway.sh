@@ -59,7 +59,7 @@ is_file ()
 check_dependencies ()
 {
     RETURN=0
-    for COMMAND in awk cut date ip ping sed sleep sort timeout tr wc wget
+    for COMMAND in awk date ip ping sleep timeout wc wget
     do
         type "$COMMAND" >/dev/null 2>&1 || {
             echo "dependency not found: '$COMMAND'" >&2
@@ -254,7 +254,11 @@ is_local_ip ()
 
 optimize_gateways ()
 {
-    GATEWAYS="$(echo "$GATEWAYS" | awk -F'=' '
+    awk '
+        BEGIN {
+            FS = "="
+        }
+
         {
             interface = $1
             gateway = $2
@@ -265,13 +269,32 @@ optimize_gateways ()
                 best_metric[key] = metric
                 pos[key] = $0
             }
-        }
-        END {
-            for (key in pos) {
-                printf "%010d|%s\n", best_metric[key], pos[key]
+
+            if (!(key in seen)) {
+                keys[++count] = key
+                seen[key] = 1
             }
         }
-    ' | sort -n | cut -d'|' -f2- | tr '\012' ' ' | sed 's/ $//')"
+
+        END {
+            for (i = 2; i <= count; i++) {
+                for (j = i; j > 1 && best_metric[keys[j-1]] > best_metric[keys[j]]; j--) {
+                    tmp = keys[j]
+                    keys[j] = keys[j-1]
+                    keys[j-1] = tmp
+                }
+            }
+
+            gateways = ""
+            for (i = 1; i <= count; i++) {
+                gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
+            }
+
+            if (gateways != "") print gateways
+        }
+    ' <<EOF
+$GATEWAYS
+EOF
 }
 
 parse_gateway ()
@@ -327,7 +350,7 @@ parse_gateway ()
         GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
     done
     is_equal "$RETURN" 0 || return "$RETURN"
-    optimize_gateways
+    GATEWAYS="$(optimize_gateways)"
 }
 
 parse_interval ()
