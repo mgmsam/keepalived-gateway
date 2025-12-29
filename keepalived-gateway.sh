@@ -204,31 +204,40 @@ is_valid_ip ()
 
 get_local_ip ()
 {
-    ip address show | case "${1:-}" in
+    case "${1:-}" in
         -4 | 4 | inet)
-            awk '$1 == "inet"  {
-                split($2, ip, "/")
-                print ip[1]
-            }'
+            set -- "inet" ${2:-}
         ;;
         -6 | 6 | inet6)
-            awk '$1 == "inet6" {
-                split($2, ip, "/")
-                print ip[1]
-            }'
+            set -- "inet6" ${2:-}
         ;;
         *)
-            awk '$1 == "inet" || $1 == "inet6" {
-                split($2, ip, "/")
-                print ip[1]
-            }'
+            set -- "inet6?" ${2:-}
         ;;
     esac
+    ip address show | awk '$1 ~ /^'"$1"'$/ {
+        if ("'"${2:-}"'" == "mask") {
+            print $2
+        } else {
+            split($2, ip, "/")
+            print ip[1]
+        }
+    }'
 }
 
 is_local_ip ()
 {
-    get_local_ip "$1" | grep "^$2$" >/dev/null 2>&1
+    case "${1:-}" in
+        "")
+            return 1
+        ;;
+        */*)
+            get_local_ip "${2:-}" mask | grep "^$1$" >/dev/null 2>&1
+        ;;
+        *)
+            get_local_ip "${2:-}" | grep "^$1$" >/dev/null 2>&1
+        ;;
+    esac
 }
 
 optimize_gateways ()
@@ -266,7 +275,7 @@ parse_gateway ()
             continue
         }
 
-        if is_local_ip "$FAMILY" "$GATEWAY"
+        if is_local_ip "$GATEWAY" "$FAMILY"
         then
             echo "Error: Gateway is a local address on this host: '$GATEWAY'"
             RETURN=2
@@ -351,7 +360,7 @@ resolve_ips ()
 
 parse_resource ()
 {
-    SCHEME="" USER_INFO="" USER="" PASS="" AUTHORITY="" PORT="" RESOURCE="" IPV4="" IPV6=""
+    SCHEME="" USER_INFO="" USER="" PASS="" AUTHORITY="" MASK="" PORT="" RESOURCE="" IPV4="" IPV6=""
     HOST="$1"
     HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
     HOST="${HOST%"${HOST##*[![:blank:]]}"}"
@@ -366,6 +375,12 @@ parse_resource ()
         */*)
             AUTHORITY="${HOST%%/*}"
             RESOURCE="${HOST#*/}"
+            case "$RESOURCE" in
+                [0-9] | [0-9][0-9] | 1[0-2][0-8])
+                    MASK="$RESOURCE"
+                    RESOURCE=""
+                ;;
+            esac
         ;;
         *)
             AUTHORITY="$HOST"
@@ -449,7 +464,14 @@ set_variables ()
     esac
     DEFAULT_METRIC="${METRIC:-}"
 
-    get_family_address "${VIRTUAL_IPADDRESS:-}" && VIRTUAL_IPADDRESS_FAMILY="$FAMILY" || {
+    is_empty "${VIRTUAL_IPADDRESS:-}" || {
+        parse_resource "$VIRTUAL_IPADDRESS" && {
+            is_valid_ip "${IPV4:-"$IPV6"}" && {
+                VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
+                VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+            }
+        }
+    } || {
         echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
         return 2
     }
@@ -617,7 +639,7 @@ check_ping ()
 is_not_vrrp_master ()
 {
     is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
-        ip -oneline -family "$VIRTUAL_IPADDRESS_FAMILY" address | grep "\<$VIRTUAL_IPADDRESS\>" &&
+        is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" &&
         return 1 || return 0
     } >/dev/null 2>&1
 }
