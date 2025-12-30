@@ -840,7 +840,7 @@ get_obsolete_routes ()
             found_separator = "no"
         }
 
-        $0 == "" && found_separator == 0 {
+        $0 == "" && found_separator == "no" {
             found_separator = "yes"
             next
         }
