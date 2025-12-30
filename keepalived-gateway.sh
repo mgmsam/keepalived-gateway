@@ -470,6 +470,13 @@ parse_resource ()
             IPV6="$HOST"
         ;;
         *[a-zA-Z]*)
+            is_not_empty "${NSLOOKUP:-}" || {
+                type nslookup >/dev/null 2>&1 && NSLOOKUP="yes" || {
+                    echo "dependency not found: 'nslookup'"
+                    echo "Please install nslookup or use an IP address instead of a domain name."
+                    return 1
+                } >&2
+            }
             IPV6="$(resolve_ips "$HOST")"
             IPV4="${IPV6%%,*}"
             IPV6="${IPV6#*,}"
