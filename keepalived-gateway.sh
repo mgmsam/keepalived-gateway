@@ -90,7 +90,7 @@ include_config ()
 
 is_interface ()
 {
-    ip link show "$1" >/dev/null 2>&1
+    ip link show ${1:-} >/dev/null 2>&1
 }
 
 get_family_address ()
@@ -482,10 +482,8 @@ parse_resource ()
 
 set_variables ()
 {
-    is_interface "${INTERFACE:-}" || {
-        echo "variable 'INTERFACE': network interface not found: '$INTERFACE'"
-        return 2
-    }
+    is_interface ${INTERFACE:-} ||
+    echo "Warning: variable 'INTERFACE': network interface not found: '$INTERFACE'"
     DEFAULT_INTERFACE="${INTERFACE:-}"
 
     case "${METRIC:=0}" in
