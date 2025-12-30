@@ -110,6 +110,174 @@ get_family_address ()
     esac
 }
 
+resolve_ips ()
+{
+    nslookup "$1" 2>/dev/null | awk '
+        /^Name:/ {
+            found = "yes"
+        }
+        found == "yes" && /^Address[ 0-9]*:/ {
+            addr = $NF
+            if (addr ~ /\./ && !v4) {
+                v4 = addr
+            }
+            if (addr ~ /:/ && !v6)  {
+                v6 = addr
+            }
+        }
+        END {
+            printf "%s,%s", v4, v6
+        }
+    '
+}
+
+parse_resource ()
+{
+    SCHEME="" USER_INFO="" USER="" PASS="" AUTHORITY="" MASK="" PORT="" RESOURCE="" IPV4="" IPV6=""
+    HOST="$1"
+    HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
+    HOST="${HOST%"${HOST##*[![:blank:]]}"}"
+    case "$HOST" in
+        *://*)
+            SCHEME="${HOST%%://*}"
+            HOST="${HOST#*://}"
+            HOST="${HOST#"${HOST%%[!/]*}"}"
+        ;;
+    esac
+    case "$HOST" in
+        */*)
+            AUTHORITY="${HOST%%/*}"
+            RESOURCE="${HOST#*/}"
+            case "$RESOURCE" in
+                [0-9] | [0-9][0-9] | 1[0-2][0-8])
+                    MASK="$RESOURCE"
+                    RESOURCE=""
+                ;;
+            esac
+        ;;
+        *)
+            AUTHORITY="$HOST"
+            RESOURCE=""
+        ;;
+    esac
+    case "$AUTHORITY" in
+        *@*)
+            USER_INFO="${AUTHORITY%@*}"
+            AUTHORITY="${AUTHORITY##*@}"
+            case "$USER_INFO" in
+                *:*)
+                    USER="${USER_INFO%%:*}"
+                    PASS="${USER_INFO#*:}"
+                ;;
+                *)
+                    USER="$USER_INFO"
+                ;;
+            esac
+        ;;
+    esac
+    case "$AUTHORITY" in
+        *]:*)
+            HOST="${AUTHORITY%]*}"
+            HOST="${HOST#[}"
+            PORT="${AUTHORITY##*:}"
+        ;;
+        *]*)
+            HOST="${AUTHORITY#[}"
+            HOST="${HOST%]}"
+        ;;
+        *:*)
+            case "${AUTHORITY%:*}" in
+                *:*)
+                    HOST="$AUTHORITY"
+                ;;
+                *)
+                    HOST="${AUTHORITY%:*}"
+                    PORT="${AUTHORITY##*:}"
+                ;;
+            esac
+        ;;
+        *)
+            HOST="$AUTHORITY"
+        ;;
+    esac
+    case "${HOST:-}" in
+        "")
+            return 1
+        ;;
+        *:*:*)
+            IPV6="$HOST"
+        ;;
+        *[a-zA-Z]*)
+            is_not_empty "${NSLOOKUP:-}" || {
+                type nslookup >/dev/null 2>&1 && NSLOOKUP="yes" || {
+                    echo "dependency not found: 'nslookup'"
+                    echo "Please install nslookup or use an IP address instead of a domain name."
+                    return 1
+                } >&2
+            }
+            IPV6="$(resolve_ips "$HOST")"
+            IPV4="${IPV6%%,*}"
+            IPV6="${IPV6#*,}"
+        ;;
+        *)
+            IPV4="$HOST"
+        ;;
+    esac
+}
+
+is_valid_ip ()
+{
+    case "${1:-}" in
+        *.*.*.*)
+            IFS="."
+            set -- $1
+            IFS="$POSIX_IFS"
+            is_equal $# 4 || return 1
+            for OCTET
+            do
+                case "$OCTET" in
+                    [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
+                    ;;
+                    *)
+                        return 1
+                    ;;
+                esac
+            done
+            FAMILY="inet"
+        ;;
+        *:*:*)
+            case "$1" in
+                *[!0-9a-fA-F:]*)
+                    return 1
+                ;;
+            esac
+            FAMILY="inet6"
+        ;;
+        *)
+            return 1
+        ;;
+    esac
+}
+
+parse_interval ()
+{
+    case "${2%[smhdwMy]}" in
+        "" | *[!0123456789]*)
+            echo "variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
+            return 2
+        ;;
+    esac
+    case "$2" in
+        *m) INTERVAL=$((${2%m} * 60)) ;;
+        *h) INTERVAL=$((${2%h} * 3600)) ;;
+        *d) INTERVAL=$((${2%d} * 86400)) ;;
+        *w) INTERVAL=$((${2%w} * 604800)) ;;
+        *M) INTERVAL=$((${2%M} * 2678400)) ;;
+        *y) INTERVAL=$((${2%y} * 32140800)) ;;
+         *) INTERVAL="${2%s}" ;;
+    esac
+}
+
 parse_gateway_entry ()
 {
     IFS="@#_=-"
@@ -164,40 +332,6 @@ parse_gateway_entry ()
         ;;
         0*)
             METRIC="${METRIC#"${METRIC%%[!0]*}"}"
-        ;;
-    esac
-}
-
-is_valid_ip ()
-{
-    case "${1:-}" in
-        *.*.*.*)
-            IFS="."
-            set -- $1
-            IFS="$POSIX_IFS"
-            is_equal $# 4 || return 1
-            for OCTET
-            do
-                case "$OCTET" in
-                    [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
-                    ;;
-                    *)
-                        return 1
-                    ;;
-                esac
-            done
-            FAMILY="inet"
-        ;;
-        *:*:*)
-            case "$1" in
-                *[!0-9a-fA-F:]*)
-                    return 1
-                ;;
-            esac
-            FAMILY="inet6"
-        ;;
-        *)
-            return 1
         ;;
     esac
 }
@@ -351,140 +485,6 @@ parse_gateway ()
     done
     is_equal "$RETURN" 0 || return "$RETURN"
     GATEWAYS="$(optimize_gateways)"
-}
-
-parse_interval ()
-{
-    case "${2%[smhdwMy]}" in
-        "" | *[!0123456789]*)
-            echo "variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
-            return 2
-        ;;
-    esac
-    case "$2" in
-        *m) INTERVAL=$((${2%m} * 60)) ;;
-        *h) INTERVAL=$((${2%h} * 3600)) ;;
-        *d) INTERVAL=$((${2%d} * 86400)) ;;
-        *w) INTERVAL=$((${2%w} * 604800)) ;;
-        *M) INTERVAL=$((${2%M} * 2678400)) ;;
-        *y) INTERVAL=$((${2%y} * 32140800)) ;;
-         *) INTERVAL="${2%s}" ;;
-    esac
-}
-
-resolve_ips ()
-{
-    nslookup "$1" 2>/dev/null | awk '
-        /^Name:/ {
-            found = "yes"
-        }
-        found == "yes" && /^Address[ 0-9]*:/ {
-            addr = $NF
-            if (addr ~ /\./ && !v4) {
-                v4 = addr
-            }
-            if (addr ~ /:/ && !v6)  {
-                v6 = addr
-            }
-        }
-        END {
-            printf "%s,%s", v4, v6
-        }
-    '
-}
-
-parse_resource ()
-{
-    SCHEME="" USER_INFO="" USER="" PASS="" AUTHORITY="" MASK="" PORT="" RESOURCE="" IPV4="" IPV6=""
-    HOST="$1"
-    HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
-    HOST="${HOST%"${HOST##*[![:blank:]]}"}"
-    case "$HOST" in
-        *://*)
-            SCHEME="${HOST%%://*}"
-            HOST="${HOST#*://}"
-            HOST="${HOST#"${HOST%%[!/]*}"}"
-        ;;
-    esac
-    case "$HOST" in
-        */*)
-            AUTHORITY="${HOST%%/*}"
-            RESOURCE="${HOST#*/}"
-            case "$RESOURCE" in
-                [0-9] | [0-9][0-9] | 1[0-2][0-8])
-                    MASK="$RESOURCE"
-                    RESOURCE=""
-                ;;
-            esac
-        ;;
-        *)
-            AUTHORITY="$HOST"
-            RESOURCE=""
-        ;;
-    esac
-    case "$AUTHORITY" in
-        *@*)
-            USER_INFO="${AUTHORITY%@*}"
-            AUTHORITY="${AUTHORITY##*@}"
-            case "$USER_INFO" in
-                *:*)
-                    USER="${USER_INFO%%:*}"
-                    PASS="${USER_INFO#*:}"
-                ;;
-                *)
-                    USER="$USER_INFO"
-                ;;
-            esac
-        ;;
-    esac
-    case "$AUTHORITY" in
-        *]:*)
-            HOST="${AUTHORITY%]*}"
-            HOST="${HOST#[}"
-            PORT="${AUTHORITY##*:}"
-        ;;
-        *]*)
-            HOST="${AUTHORITY#[}"
-            HOST="${HOST%]}"
-        ;;
-        *:*)
-            case "${AUTHORITY%:*}" in
-                *:*)
-                    HOST="$AUTHORITY"
-                ;;
-                *)
-                    HOST="${AUTHORITY%:*}"
-                    PORT="${AUTHORITY##*:}"
-                ;;
-            esac
-        ;;
-        *)
-            HOST="$AUTHORITY"
-        ;;
-    esac
-    case "${HOST:-}" in
-        "")
-            return 1
-        ;;
-        *:*:*)
-            IPV6="$HOST"
-        ;;
-        *[a-zA-Z]*)
-            is_not_empty "${NSLOOKUP:-}" || {
-                type nslookup >/dev/null 2>&1 && NSLOOKUP="yes" || {
-                    echo "dependency not found: 'nslookup'"
-                    echo "Please install nslookup or use an IP address instead of a domain name."
-                    return 1
-                } >&2
-            }
-            IPV6="$(resolve_ips "$HOST")"
-            IPV4="${IPV6%%,*}"
-            IPV6="${IPV6#*,}"
-        ;;
-        *)
-            IPV4="$HOST"
-        ;;
-    esac
 }
 
 set_variables ()
@@ -705,63 +705,6 @@ clean_and_exit ()
     is_equal "${EXIT:-}" 0 && exit "$RETURN" || exit "$EXIT"
 }
 
-check_ping ()
-{
-    ping -W "${PING_TIMEOUT:=3}" -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
-}
-
-is_not_vrrp_master ()
-{
-    is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
-        is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" &&
-        return 1 || return 0
-    } >/dev/null 2>&1
-}
-
-get_time ()
-{
-    date "+%s"
-}
-
-wait_for_speedtest ()
-{
-    is_not_empty "${LAST_SPEEDTEST:-}" &&
-    test $(( $(get_time) - LAST_SPEEDTEST )) -lt "$SPEEDTEST_INTERVAL"
-}
-
-bit2Human ()
-{
-    BIT="${1:-0}" REMAINS="" SIZE=1
-    while test "$BIT" -ge 1000
-    do
-        REMAINS=$(( (BIT % 1000) / 10 ))
-        REMAINS=$(printf ".%02d" "$REMAINS")
-        BIT=$((BIT / 1000))
-        SIZE=$((SIZE + 1))
-    done
-    set -- bit Kbit Mbit Gbit Tbit Ebit Pbit Zbit Ybit
-    shift $((SIZE - 1))
-    UNIT="$1"
-    echo "$BIT${REMAINS:-} $UNIT"
-}
-
-speedtest ()
-{
-    START_SPEEDTEST="$(get_time)"
-    BYTE="$(
-        $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
-        $DOWNLOAD_CMD $DOWNLOAD_INET $DOWNLOAD_OPTIONS "$SPEEDTEST_URL" | wc -c
-    )"
-    END_SPEEDTEST="$(get_time)"
-    BYTE=$(( ${BYTE:-0} + 0 ))
-    DURATION=$((END_SPEEDTEST - START_SPEEDTEST))
-    test "$DURATION" -gt 0 || DURATION=1
-    test "$BYTE" -gt 1024 && {
-        BIT=$(( (BYTE * 8) / DURATION ))
-        echo "route speed: $(bit2Human "$BIT")/s"
-    }
-}
-
 format_route ()
 {
     IFS="="
@@ -807,6 +750,63 @@ collect_interface ()
 collect_route ()
 {
     DEFAULT_ROUTES="${DEFAULT_ROUTES:+"$DEFAULT_ROUTES$LF"}$NEW_ROUTE"
+}
+
+get_time ()
+{
+    date "+%s"
+}
+
+wait_for_speedtest ()
+{
+    is_not_empty "${LAST_SPEEDTEST:-}" &&
+    test $(( $(get_time) - LAST_SPEEDTEST )) -lt "$SPEEDTEST_INTERVAL"
+}
+
+is_not_vrrp_master ()
+{
+    is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
+        is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" &&
+        return 1 || return 0
+    } >/dev/null 2>&1
+}
+
+bit2Human ()
+{
+    BIT="${1:-0}" REMAINS="" SIZE=1
+    while test "$BIT" -ge 1000
+    do
+        REMAINS=$(( (BIT % 1000) / 10 ))
+        REMAINS=$(printf ".%02d" "$REMAINS")
+        BIT=$((BIT / 1000))
+        SIZE=$((SIZE + 1))
+    done
+    set -- bit Kbit Mbit Gbit Tbit Ebit Pbit Zbit Ybit
+    shift $((SIZE - 1))
+    UNIT="$1"
+    echo "$BIT${REMAINS:-} $UNIT"
+}
+
+speedtest ()
+{
+    START_SPEEDTEST="$(get_time)"
+    BYTE="$(
+        $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
+        $DOWNLOAD_CMD $DOWNLOAD_INET $DOWNLOAD_OPTIONS "$SPEEDTEST_URL" | wc -c
+    )"
+    END_SPEEDTEST="$(get_time)"
+    BYTE=$(( ${BYTE:-0} + 0 ))
+    DURATION=$((END_SPEEDTEST - START_SPEEDTEST))
+    test "$DURATION" -gt 0 || DURATION=1
+    test "$BYTE" -gt 1024 && {
+        BIT=$(( (BYTE * 8) / DURATION ))
+        echo "route speed: $(bit2Human "$BIT")/s"
+    }
+}
+
+check_ping ()
+{
+    ping -W "${PING_TIMEOUT:=3}" -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
 }
 
 add_route ()
