@@ -689,7 +689,7 @@ ${SPEEDTEST_IPV6:+"$(ip route show "$SPEEDTEST_IPV6")"}
 EOF
     }
 
-    return "${RETURN:=0}"
+    return "${RETURN:-0}"
 }
 
 clean_and_exit ()
@@ -946,23 +946,28 @@ maintain_route ()
     remove_obsolete_routes || :
 }
 
-LF="
+main ()
+{
+    LF="
 "
-POSIX_IFS="$(printf " \t")$LF"
-IFS="$POSIX_IFS"
+    POSIX_IFS="$(printf " \t")$LF"
+    IFS="$POSIX_IFS"
 
-check_dependencies &&
-include_config &&
-set_variables &&
-remove_test_route || exit
+    check_dependencies &&
+    include_config &&
+    set_variables &&
+    remove_test_route || return
 
-trap 'clean_and_exit' 0       # EXIT (0) : Naturally occurring script termination.
-trap 'clean_and_exit 129' 1   # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
-trap 'clean_and_exit 130' 2   # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
-trap 'clean_and_exit 131' 15  # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
+    trap 'clean_and_exit' 0       # EXIT (0) : Naturally occurring script termination.
+    trap 'clean_and_exit 129' 1   # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
+    trap 'clean_and_exit 130' 2   # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
+    trap 'clean_and_exit 143' 15  # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
 
-while :
-do
-    maintain_route
-    sleep "$CHECK_INTERVAL"
-done
+    while :
+    do
+        maintain_route
+        sleep "$CHECK_INTERVAL"
+    done
+}
+
+main
