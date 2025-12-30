@@ -656,43 +656,23 @@ ip_route ()
 
 remove_test_route ()
 {
-    is_empty "${PING_HOST:-}" || {
+    for IP in ${PING_IPV4:-} ${SPEEDTEST_IPV4:-}
+    do
         IP_ROUTE="ip -4"
-        while read -r ROUTE
+        while ip_route del "$IP"
         do
-            is_not_empty "${ROUTE:-}" || continue
-            ip_route del $ROUTE || RETURN=$?
-        done <<EOF
-${PING_IPV4:+"$(ip route show "$PING_IPV4")"}
-EOF
-        IP_ROUTE="ip -6"
-        while read -r ROUTE
-        do
-            is_not_empty "${ROUTE:-}" || continue
-            ip_route del $ROUTE || RETURN=$?
-        done <<EOF
-${PING_IPV6:+"$(ip route show "$PING_IPV6")"}
-EOF
-    }
+            :
+        done 2>/dev/null
+    done
 
-    is_empty "${SPEEDTEST_HOST:-}" || {
-        IP_ROUTE="ip -4"
-        while read -r ROUTE
-        do
-            is_not_empty "${ROUTE:-}" || continue
-            ip_route del $ROUTE || RETURN=$?
-        done <<EOF
-${SPEEDTEST_IPV4:+"$(ip route show "$SPEEDTEST_IPV4")"}
-EOF
+    for IP in ${PING_IPV6:-} ${SPEEDTEST_IPV6:-}
+    do
         IP_ROUTE="ip -6"
-        while read -r ROUTE
+        while ip_route del "$IP"
         do
-            is_not_empty "${ROUTE:-}" || continue
-            ip_route del $ROUTE || RETURN=$?
-        done <<EOF
-${SPEEDTEST_IPV6:+"$(ip route show "$SPEEDTEST_IPV6")"}
-EOF
-    }
+            :
+        done 2>/dev/null
+    done
 
     return "${RETURN:-0}"
 }
