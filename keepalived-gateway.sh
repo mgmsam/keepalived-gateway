@@ -720,6 +720,7 @@ collect_interface ()
 {
     case " ${IFACES:-} " in
         *" $INTERFACE "*)
+            return 1
         ;;
         *)
             IFACES="${IFACES:+"$IFACES "}$INTERFACE"
@@ -870,7 +871,7 @@ EOF
 maintain_route ()
 {
     DEFAULT_ROUTES=""
-    PREV_METRIC=""
+    PREV_METRIC=0
     NEW_ROUTE=""
     BEST_BIT=0
     IFACES=""
@@ -878,14 +879,19 @@ maintain_route ()
     for GATEWAY in $GATEWAYS
     do
         format_route || continue
-        collect_interface
 
-        is_equal "${METRIC:-0}" "${PREV_METRIC:-0}" || {
-            collect_route
+        if is_equal "$PREV_METRIC" "${METRIC:-0}" || {
             PREV_METRIC="$METRIC"
-            NEW_ROUTE=""
             BEST_BIT=0
+            is_empty "${NEW_ROUTE:-}"
         }
+        then
+            collect_interface || :
+        else
+            collect_route
+            NEW_ROUTE=""
+            collect_interface || continue
+        fi
 
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
             ip_route replace "$SPEEDTEST_ROUTE"
