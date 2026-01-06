@@ -978,7 +978,7 @@ maintain_route ()
     do
         format_route
         echo
-        echo "testing gateway: '$GATEWAY_IP ($INTERFACE)'"
+        echo "testing gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
 
         is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
             is_empty "${BEST_ROUTE:-}" || {
@@ -993,7 +993,7 @@ maintain_route ()
         is_interface "$INTERFACE" || continue
 
         is_equal "$SPEEDTEST" no || is_not_vrrp_master || {
-            echo "measuring speed to host: '$SPEEDTEST_HOST' via '$SPEEDTEST_ROUTE'"
+            echo "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
 
             ip_route replace "$SPEEDTEST_ROUTE"
             if speedtest "$SPEEDTEST_URL"
@@ -1007,24 +1007,24 @@ maintain_route ()
                 continue
             fi
             ip_route del "$SPEEDTEST_ROUTE"
-            echo "failed to measure speed from '$SPEEDTEST_HOST' via '$SPEEDTEST_ROUTE'"
+            echo "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
         }
 
         is_empty "${BEST_ROUTE:-}" || continue
 
         if is_not_empty "${PING_HOST:-}"
         then
-            echo "probing host address: '$PING_HOST' via '$PING_ROUTE'"
+            echo "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
 
             ip_route replace "$PING_ROUTE"
             check_ping -I "$INTERFACE" "$PING_IP" && {
                 ip_route del "$PING_ROUTE"
-                echo "reachable host address: '$PING_HOST' via '$PING_ROUTE'"
+                echo "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
                 BEST_GATEWAY="$GATEWAY"
                 BEST_ROUTE="$ROUTE"
             } || {
                 ip_route del "$PING_ROUTE"
-                echo "unreachable host address: '$PING_HOST' via '$PING_ROUTE'"
+                echo "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
                 check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
                     echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
                     echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
