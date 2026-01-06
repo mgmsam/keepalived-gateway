@@ -993,6 +993,8 @@ maintain_route ()
             echo "failed to measure speed from '$SPEEDTEST_HOST' via route '$SPEEDTEST_ROUTE'"
         }
 
+        is_empty "${BEST_ROUTE:-}" || continue
+
         if is_not_empty "${PING_HOST:-}"
         then
             ip_route replace "$PING_ROUTE"
