@@ -763,11 +763,13 @@ is_failed_metric ()
 collect_gateway ()
 {
     DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS:+"$DEFAULT_GATEWAYS "}$BEST_GATEWAY"
+    BEST_GATEWAY=""
 }
 
 collect_route ()
 {
     DEFAULT_ROUTES="${DEFAULT_ROUTES:+"$DEFAULT_ROUTES$LF"}$BEST_ROUTE"
+    BEST_ROUTE=""
 }
 
 get_time ()
@@ -965,8 +967,6 @@ maintain_route ()
             is_empty "${BEST_ROUTE:-}" || {
                 collect_gateway
                 collect_route
-                BEST_GATEWAY=""
-                BEST_ROUTE=""
                 BEST_SPEED=0
             }
             is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
