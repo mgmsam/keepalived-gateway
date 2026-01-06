@@ -386,6 +386,17 @@ is_local_ip ()
     '
 }
 
+collect_interface ()
+{
+    case " ${IFACES:-} " in
+        *" $INTERFACE "*)
+        ;;
+        *)
+            IFACES="${IFACES:+"$IFACES "}$INTERFACE"
+        ;;
+    esac
+}
+
 optimize_gateways ()
 {
     awk '
@@ -431,9 +442,27 @@ $GATEWAYS
 EOF
 }
 
+count_metrics ()
+{
+    awk '
+        {
+            for (i=1; i<=NF; i++) {
+                fields = split($i, gateway, "=")
+                metric = (fields >= 3 && gateway[3] != "") ? gateway[3] : 0
+                if (gateway[1] != "" && !seen[metric]++) count++
+            }
+        }
+        END { print count + 0 }
+    ' <<EOF
+$GATEWAYS
+EOF
+}
+
 parse_gateway ()
 {
-    GATEWAYS= RETURN=0
+    IFACES=""
+    GATEWAYS=""
+    RETURN=0
     for GATEWAY
     do
         parse_gateway_entry || return
@@ -482,9 +511,11 @@ parse_gateway ()
         }
 
         GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
+        collect_interface
     done
     is_equal "$RETURN" 0 || return "$RETURN"
     GATEWAYS="$(optimize_gateways)"
+    TOTAL_METRICS="$(count_metrics)"
 }
 
 set_variables ()
@@ -688,13 +719,12 @@ clean_and_exit ()
 format_route ()
 {
     IFS="="
-    read INTERFACE GATEWAY METRIC <<EOF
+    read INTERFACE GATEWAY_IP METRIC <<EOF
 $GATEWAY
 EOF
     IFS="$POSIX_IFS"
 
-    is_interface "$INTERFACE" || return
-    case "$GATEWAY" in
+    case "$GATEWAY_IP" in
         *:*)
             IP_ROUTE="ip -6"
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV6:-}"
@@ -711,26 +741,33 @@ EOF
         ;;
     esac
 
-    ROUTE="default via $GATEWAY dev $INTERFACE${METRIC:+" metric $METRIC"}"
-    SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY dev $INTERFACE"
-    PING_ROUTE="${PING_IP:-} via $GATEWAY dev $INTERFACE"
+    ROUTE="default via $GATEWAY_IP dev $INTERFACE${METRIC:+" metric $METRIC"}"
+    SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY_IP dev $INTERFACE"
+    PING_ROUTE="${PING_IP:-} via $GATEWAY_IP dev $INTERFACE"
 }
 
-collect_interface ()
+is_metric_alive ()
 {
-    case " ${IFACES:-} " in
-        *" $INTERFACE "*)
+    case " $ALIVE_METRICS " in
+        *" ${METRIC:-0} "*)
             return 1
-        ;;
-        *)
-            IFACES="${IFACES:+"$IFACES "}$INTERFACE"
         ;;
     esac
 }
 
+is_failed_metric ()
+{
+    is_metric_alive && return 1 || return 0
+}
+
+collect_gateway ()
+{
+    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS:+"$DEFAULT_GATEWAYS "}$BEST_GATEWAY"
+}
+
 collect_route ()
 {
-    DEFAULT_ROUTES="${DEFAULT_ROUTES:+"$DEFAULT_ROUTES$LF"}$NEW_ROUTE"
+    DEFAULT_ROUTES="${DEFAULT_ROUTES:+"$DEFAULT_ROUTES$LF"}$BEST_ROUTE"
 }
 
 get_time ()
@@ -868,39 +905,85 @@ $REMOVE_ROUTES
 EOF
 }
 
+check_gateways ()
+{
+    is_not_empty "${DEFAULT_GATEWAYS:-}" || return
+
+    ALIVE_COUNT=0
+    ALIVE_GATEWAYS=""
+    ALIVE_METRICS=""
+    ALIVE_ROUTES=""
+
+    for GATEWAY in $DEFAULT_GATEWAYS
+    do
+        format_route
+
+        is_interface "$INTERFACE" || {
+            echo "interface not found or down: '$INTERFACE'"
+            continue
+        }
+
+        if is_not_empty "${PING_HOST:-}"
+        then
+            ip_route replace "$PING_ROUTE"
+            check_ping -I "$INTERFACE" "$PING_IP" || {
+                ip_route del "$PING_ROUTE"
+                echo "host '$PING_HOST' is unreachable via route '$ROUTE'"
+                continue
+            }
+            ip_route del "$PING_ROUTE"
+        else
+            check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
+                echo "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
+                continue
+            }
+        fi
+
+        ALIVE_COUNT="$((ALIVE_COUNT + 1))"
+        ALIVE_GATEWAYS="${ALIVE_GATEWAYS:+"$ALIVE_GATEWAYS "}$GATEWAY"
+        ALIVE_METRICS="${ALIVE_METRICS:+"$ALIVE_METRICS "}${METRIC:-0}"
+        ALIVE_ROUTES="${ALIVE_ROUTES:+"$ALIVE_ROUTES$LF"}$ROUTE"
+    done
+    is_equal "$ALIVE_COUNT" "$TOTAL_METRICS"
+}
+
 maintain_route ()
 {
-    DEFAULT_ROUTES=""
-    PREV_METRIC=0
-    NEW_ROUTE=""
-    BEST_BIT=0
-    IFACES=""
+    DEFAULT_GATEWAYS="${ALIVE_GATEWAYS:-}"
+    DEFAULT_ROUTES="${ALIVE_ROUTES:-}"
+    CURRENT_METRIC=""
+    BEST_GATEWAY=""
+    BEST_ROUTE=""
+    BEST_SPEED=0
 
     for GATEWAY in $GATEWAYS
     do
-        format_route || continue
+        format_route
 
-        if is_equal "$PREV_METRIC" "${METRIC:-0}" || {
-            PREV_METRIC="$METRIC"
-            BEST_BIT=0
-            is_empty "${NEW_ROUTE:-}"
+        is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
+
+            is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
+
+            CURRENT_METRIC="$METRIC"
+            BEST_SPEED=0
+            is_empty "${BEST_ROUTE:-}" || {
+                collect_gateway
+                collect_route
+                BEST_ROUTE=""
+            }
         }
-        then
-            collect_interface || :
-        else
-            collect_route
-            NEW_ROUTE=""
-            collect_interface || continue
-        fi
+
+        is_interface "$INTERFACE" || continue
 
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
             ip_route replace "$SPEEDTEST_ROUTE"
 
             if speedtest "$SPEEDTEST_URL"
             then
-                test "$BEST_BIT" -ge "$BIT" || {
-                    NEW_ROUTE="$ROUTE"
-                    BEST_BIT="$BIT"
+                test "$BEST_SPEED" -ge "$BIT" || {
+                    BEST_GATEWAY="$GATEWAY"
+                    BEST_ROUTE="$ROUTE"
+                    BEST_SPEED="$BIT"
                 }
                 ip_route del "$SPEEDTEST_ROUTE"
                 continue
@@ -913,23 +996,30 @@ maintain_route ()
         if is_not_empty "${PING_HOST:-}"
         then
             ip_route replace "$PING_ROUTE"
-
-            check_ping -I "$INTERFACE" "$PING_IP" && NEW_ROUTE="$ROUTE" || {
+            check_ping -I "$INTERFACE" "$PING_IP" && {
+                BEST_GATEWAY="$GATEWAY"
+                BEST_ROUTE="$ROUTE"
+            } || {
                 echo "host '$PING_HOST' is unreachable via route '$PING_ROUTE'"
-                check_ping -I "$INTERFACE" "$GATEWAY" &&
-                echo "gateway '$GATEWAY' is reachable on interface '$INTERFACE'" ||
-                echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
+                check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
+                echo "gateway '$GATEWAY_IP' is reachable on interface '$INTERFACE'" ||
+                echo "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
             }
-
             ip_route del "$PING_ROUTE"
         else
-            check_ping -I "$INTERFACE" "$GATEWAY" && NEW_ROUTE="$ROUTE" ||
-            echo "gateway '$GATEWAY' is unreachable on interface '$INTERFACE'"
+            check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
+                BEST_GATEWAY="$GATEWAY"
+                BEST_ROUTE="$ROUTE"
+            } ||
+            echo "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
         fi
     done
 
     LAST_SPEEDTEST="${END_SPEEDTEST:-}"
-    is_empty "${NEW_ROUTE:-}" || collect_route
+    is_empty "${BEST_ROUTE:-}" || {
+        collect_gateway
+        collect_route
+    }
 
     add_route &&
     get_current_routes &&
@@ -954,9 +1044,13 @@ main ()
     trap 'clean_and_exit 130' 2   # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
     trap 'clean_and_exit 143' 15  # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
 
+    ALIVE_GATEWAYS=""
+    ALIVE_METRICS=""
+    ALIVE_ROUTES=""
+
     while :
     do
-        maintain_route
+        check_gateways || maintain_route
         sleep "$CHECK_INTERVAL"
     done
 }
