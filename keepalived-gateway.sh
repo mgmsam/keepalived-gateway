@@ -832,6 +832,8 @@ check_ping ()
 add_route ()
 {
     is_not_empty "${DEFAULT_ROUTES:-}" || return
+    echo
+    echo "applying optimized routes to the system..."
     while read ROUTE
     do
         ip_route replace "$ROUTE" || :
@@ -899,6 +901,8 @@ get_obsolete_routes ()
 remove_obsolete_routes ()
 {
     is_not_empty "${REMOVE_ROUTES:-}" || return
+    echo
+    echo "removing obsolete routes from the system..."
     while read ROUTE
     do
         ip_route del "$ROUTE"
@@ -919,6 +923,8 @@ check_gateways ()
     for GATEWAY in $DEFAULT_GATEWAYS
     do
         format_route
+        echo
+        echo "checking active route: '$ROUTE'"
 
         is_interface "$INTERFACE" || {
             echo "interface not found or down: '$INTERFACE'"
@@ -940,6 +946,7 @@ check_gateways ()
                 continue
             }
         fi
+        echo "alive active route: '$ROUTE'"
 
         ALIVE_COUNT="$((ALIVE_COUNT + 1))"
         ALIVE_GATEWAYS="${ALIVE_GATEWAYS:+"$ALIVE_GATEWAYS "}$GATEWAY"
@@ -961,9 +968,10 @@ maintain_route ()
     for GATEWAY in $GATEWAYS
     do
         format_route
+        echo
+        echo "testing gateway: '$GATEWAY_IP ($INTERFACE)'"
 
         is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
-
             is_empty "${BEST_ROUTE:-}" || {
                 collect_gateway
                 collect_route
@@ -976,8 +984,9 @@ maintain_route ()
         is_interface "$INTERFACE" || continue
 
         is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
-            ip_route replace "$SPEEDTEST_ROUTE"
+            echo "measuring speed to host: '$SPEEDTEST_HOST' via '$SPEEDTEST_ROUTE'"
 
+            ip_route replace "$SPEEDTEST_ROUTE"
             if speedtest "$SPEEDTEST_URL"
             then
                 test "$BEST_SPEED" -ge "$BIT" || {
@@ -988,32 +997,37 @@ maintain_route ()
                 ip_route del "$SPEEDTEST_ROUTE"
                 continue
             fi
-
             ip_route del "$SPEEDTEST_ROUTE"
-            echo "failed to measure speed from '$SPEEDTEST_HOST' via route '$SPEEDTEST_ROUTE'"
+            echo "failed to measure speed from '$SPEEDTEST_HOST' via '$SPEEDTEST_ROUTE'"
         }
 
         is_empty "${BEST_ROUTE:-}" || continue
 
         if is_not_empty "${PING_HOST:-}"
         then
+            echo "probing host address: '$PING_HOST' via '$PING_ROUTE'"
+
             ip_route replace "$PING_ROUTE"
             check_ping -I "$INTERFACE" "$PING_IP" && {
+                ip_route del "$PING_ROUTE"
+                echo "reachable host address: '$PING_HOST' via '$PING_ROUTE'"
                 BEST_GATEWAY="$GATEWAY"
                 BEST_ROUTE="$ROUTE"
             } || {
-                echo "host '$PING_HOST' is unreachable via route '$PING_ROUTE'"
+                ip_route del "$PING_ROUTE"
+                echo "unreachable host address: '$PING_HOST' via '$PING_ROUTE'"
                 check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
-                echo "gateway '$GATEWAY_IP' is reachable on interface '$INTERFACE'" ||
-                echo "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
+                    echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
+                    echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
             }
-            ip_route del "$PING_ROUTE"
         else
+            echo "probing gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+
             check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
+                echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
                 BEST_GATEWAY="$GATEWAY"
                 BEST_ROUTE="$ROUTE"
-            } ||
-            echo "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
+            } || echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
         fi
     done
 
@@ -1053,6 +1067,7 @@ main ()
     while :
     do
         check_gateways || maintain_route
+        echo "next check cycle in: '$CHECK_INTERVAL' seconds"
         sleep "$CHECK_INTERVAL"
     done
 }
