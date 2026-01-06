@@ -278,6 +278,26 @@ parse_interval ()
     esac
 }
 
+format_duration ()
+{
+    S=${1:-0}
+
+    D=$((S / 86400))
+    S=$((S % 86400))
+    H=$((S / 3600))
+    S=$((S % 3600))
+    M=$((S / 60))
+    S=$((S % 60))
+
+    RESULT=""
+    test "$D" -gt 0 && RESULT="${D}d" || :
+    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
+    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
+    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
+
+    echo "$RESULT"
+}
+
 parse_gateway_entry ()
 {
     IFS="@#_=-"
@@ -549,6 +569,7 @@ set_variables ()
 
     parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}" || return
     CHECK_INTERVAL="$INTERVAL"
+    HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
 
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
@@ -1054,7 +1075,7 @@ main ()
     while :
     do
         check_gateways || maintain_route
-        echo "next check cycle in: '$CHECK_INTERVAL' seconds"
+        echo "next check cycle in: '$HUMAN_INTERVAL'"
         sleep "$CHECK_INTERVAL"
     done
 }
