@@ -563,9 +563,6 @@ set_variables ()
         ;;
     esac
 
-    parse_interval SPEEDTEST_INTERVAL "${SPEEDTEST_INTERVAL:-3600}" || return
-    SPEEDTEST_INTERVAL="$INTERVAL"
-
     is_empty "${PING_HOST:-}" || {
         parse_resource "$PING_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
             echo "Error: Failed to resolve PING_HOST IP."
@@ -654,9 +651,6 @@ set_variables ()
             SPEEDTEST_URL_IPV6="${IPV6:+${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$SPEEDTEST_AUTHORITY_IPV6${RESOURCE:-}}"
             SPEEDTEST_IPV4="${IPV4:-}"
             SPEEDTEST_IPV6="${IPV6:-}"
-
-            test "$SPEEDTEST_INTERVAL" -ge "$CHECK_INTERVAL" ||
-            echo "variable 'SPEEDTEST_INTERVAL': adjusted to '$CHECK_INTERVAL', must be '>= CHECK_INTERVAL'"
         }
     }
 
@@ -772,23 +766,17 @@ collect_route ()
     BEST_ROUTE=""
 }
 
-get_time ()
-{
-    date "+%s"
-}
-
-wait_for_speedtest ()
-{
-    is_not_empty "${LAST_SPEEDTEST:-}" &&
-    test $(( $(get_time) - LAST_SPEEDTEST )) -lt "$SPEEDTEST_INTERVAL"
-}
-
 is_not_vrrp_master ()
 {
     is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
         is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" &&
         return 1 || return 0
     } >/dev/null 2>&1
+}
+
+get_time ()
+{
+    date "+%s"
 }
 
 bit2Human ()
@@ -983,7 +971,7 @@ maintain_route ()
 
         is_interface "$INTERFACE" || continue
 
-        is_equal "$SPEEDTEST" no || wait_for_speedtest || is_not_vrrp_master || {
+        is_equal "$SPEEDTEST" no || is_not_vrrp_master || {
             echo "measuring speed to host: '$SPEEDTEST_HOST' via '$SPEEDTEST_ROUTE'"
 
             ip_route replace "$SPEEDTEST_ROUTE"
@@ -1031,7 +1019,6 @@ maintain_route ()
         fi
     done
 
-    LAST_SPEEDTEST="${END_SPEEDTEST:-}"
     is_empty "${BEST_ROUTE:-}" || {
         collect_gateway
         collect_route
