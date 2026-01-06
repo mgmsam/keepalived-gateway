@@ -962,15 +962,15 @@ maintain_route ()
 
         is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
 
-            is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
-
-            CURRENT_METRIC="$METRIC"
-            BEST_SPEED=0
             is_empty "${BEST_ROUTE:-}" || {
                 collect_gateway
                 collect_route
+                BEST_GATEWAY=""
                 BEST_ROUTE=""
+                BEST_SPEED=0
             }
+            is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
+            CURRENT_METRIC="$METRIC"
         }
 
         is_interface "$INTERFACE" || continue
