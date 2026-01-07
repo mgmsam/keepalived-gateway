@@ -591,7 +591,7 @@ set_variables ()
 
     is_empty "${PING_HOST:-}" || {
         parse_resource "$PING_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
-            echo "Error: Failed to resolve PING_HOST IP."
+            echo "Error: Failed to resolve PING_HOST IP: '$PING_HOST'"
             return 2
         }
         PING_IPV4="${IPV4:-}"
@@ -601,7 +601,7 @@ set_variables ()
     is_equal "$SPEEDTEST" "no" || {
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
             parse_resource "$SPEEDTEST_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
-                echo "Error: Failed to resolve SPEEDTEST_HOST IP."
+                echo "Error: Failed to resolve SPEEDTEST_HOST IP: '$SPEEDTEST_HOST'"
                 return 2
             }
 
