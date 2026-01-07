@@ -129,10 +129,46 @@ get_family_address ()
 
 resolve_ips ()
 {
-    IPV4="$($TIMEOUT 2 $PING4 -c 1 "$1" 2>/dev/null | awk -F'[()]' '/PING/ {print $2; exit}')"
-    IPV6=""
-    is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 2 $PING6 -c 1 "$1" 2>/dev/null | awk -F'[()]' '/PING/ {print $2; exit}')"
+
+    IPV4=$(awk '
+        $1 !~ /^#/ {
+            for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                if ($1 ~ /\./) {
+                    print $1
+                    exit
+                }
+            }
+        }
+    ' /etc/hosts)
+
+    IPV6=$(awk '
+        $1 !~ /^#/ {
+            for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                if ($1 ~ /:/) {
+                    print $1
+                    exit
+                }
+            }
+        }
+    ' /etc/hosts)
+
+    is_not_empty "${IPV4:-}" ||
+        IPV4="$($TIMEOUT 2 $PING4 -c 1 "$1" 2>/dev/null | awk '
+            /PING/ {
+                split($0, a, /[()]/)
+                print a[2]
+                exit
+            }
+        ')"
+
+    is_not_empty "${IPV6:-}" || is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 2 $PING6 -c 1 "$1" 2>/dev/null | awk '
+            /PING/ {
+                split($0, a, /[()]/)
+                print a[2]
+                exit
+            }
+        ')"
 }
 
 parse_resource ()
