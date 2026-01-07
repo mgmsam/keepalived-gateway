@@ -68,12 +68,29 @@ check_dependencies ()
     done
     is_equal "$RETURN" 0 || return "$RETURN"
 
-    if timeout -t 1 sleep 0 >/dev/null 2>&1
+    if ping -4 -c 1 -w 1 127.0.0.1
+    then
+        PING4="ping -4"
+    else
+        PING4="ping"
+    fi >/dev/null 2>&1
+
+    if ping -6 -c 1 -w 1 ::1
+    then
+        PING6="ping -6"
+    elif ping6 -c 1 -w 1 ::1
+    then
+        PING6="ping6"
+    else
+        PING6=""
+    fi >/dev/null 2>&1
+
+    if timeout -t 1 sleep 0
     then
         TIMEOUT="timeout -t"
     else
         TIMEOUT="timeout"
-    fi
+    fi >/dev/null 2>&1
 }
 
 include_config ()
@@ -112,23 +129,10 @@ get_family_address ()
 
 resolve_ips ()
 {
-    nslookup "$1" 2>/dev/null | awk '
-        /^Name:/ {
-            found = "yes"
-        }
-        found == "yes" && /^Address[ 0-9]*:/ {
-            addr = $NF
-            if (addr ~ /\./ && !v4) {
-                v4 = addr
-            }
-            if (addr ~ /:/ && !v6)  {
-                v6 = addr
-            }
-        }
-        END {
-            printf "%s,%s", v4, v6
-        }
-    '
+    IPV4="$($TIMEOUT 2 $PING4 -c 1 "$1" 2>/dev/null | awk -F'[()]' '/PING/ {print $2; exit}')"
+    IPV6=""
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 2 $PING6 -c 1 "$1" 2>/dev/null | awk -F'[()]' '/PING/ {print $2; exit}')"
 }
 
 parse_resource ()
@@ -208,16 +212,7 @@ parse_resource ()
             IPV6="$HOST"
         ;;
         *[a-zA-Z]*)
-            is_not_empty "${NSLOOKUP:-}" || {
-                type nslookup >/dev/null 2>&1 && NSLOOKUP="yes" || {
-                    echo "dependency not found: 'nslookup'"
-                    echo "Please install nslookup or use an IP address instead of a domain name."
-                    return 1
-                } >&2
-            }
-            IPV6="$(resolve_ips "$HOST")"
-            IPV4="${IPV6%%,*}"
-            IPV6="${IPV6#*,}"
+            resolve_ips "$HOST"
         ;;
         *)
             IPV4="$HOST"
@@ -500,6 +495,16 @@ parse_gateway ()
             continue
         fi
 
+        case "$FAMILY" in
+            inet6)
+                is_not_empty "${PING6:-}"
+            ;;
+        esac || {
+            echo "Error: Gateway '$GATEWAY' is '$FAMILY', but no compatible ping tool was found in the system."
+            RETURN=2
+            continue
+        }
+
         is_empty "${PING_HOST:-}" || {
             case "$FAMILY" in
                 inet)
@@ -745,6 +750,7 @@ EOF
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV6:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
             PING_IP="${PING_IPV6:-}"
+            PING="${PING6:-}"
             DOWNLOAD_INET="-6"
         ;;
         *)
@@ -752,6 +758,7 @@ EOF
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV4:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
             PING_IP="${PING_IPV4:-}"
+            PING="${PING4:-}"
             DOWNLOAD_INET="-4"
         ;;
     esac
@@ -835,7 +842,7 @@ speedtest ()
 
 check_ping ()
 {
-    ping -W "${PING_TIMEOUT:=3}" -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
+    $TIMEOUT "${PING_TIMEOUT:=3}" $PING -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
 }
 
 add_route ()
