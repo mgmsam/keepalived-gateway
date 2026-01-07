@@ -1098,10 +1098,9 @@ maintain_route ()
             collect_route
         }
 
-        is_empty "${DEFAULT_GATEWAYS:-}" || {
-            echo "Warning: no alive gateways available, retrying in 1s..."
-            break
-        }
+        is_empty "${DEFAULT_GATEWAYS:-}" || break
+
+        echo "Warning: no alive gateways available, retrying in 1s..."
         sleep 1
     done
 
