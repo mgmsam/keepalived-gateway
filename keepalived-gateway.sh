@@ -834,10 +834,7 @@ speedtest ()
     BYTE=$(( ${BYTE:-0} + 0 ))
     DURATION=$((END_SPEEDTEST - START_SPEEDTEST))
     test "$DURATION" -gt 0 || DURATION=1
-    test "$BYTE" -gt 1024 && {
-        BIT=$(( (BYTE * 8) / DURATION ))
-        echo "route speed: $(bit2Human "$BIT")/s"
-    }
+    test "$BYTE" -gt 1024 && BIT=$(( (BYTE * 8) / DURATION ))
 }
 
 check_ping ()
@@ -1011,6 +1008,7 @@ maintain_route ()
                     BEST_SPEED="$BIT"
                 }
                 ip_route del "$SPEEDTEST_ROUTE"
+                echo "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
                 continue
             fi
             ip_route del "$SPEEDTEST_ROUTE"
