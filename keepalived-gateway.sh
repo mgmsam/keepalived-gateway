@@ -131,7 +131,7 @@ resolve_ips ()
 {
 
     IPV4=$(awk '
-        $1 !~ /^#/ {
+        /^[ \t]*[^#]/ {
             for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
                 if ($1 ~ /\./) {
                     print $1
@@ -142,7 +142,7 @@ resolve_ips ()
     ' /etc/hosts)
 
     IPV6=$(awk '
-        $1 !~ /^#/ {
+        /^[ \t]*[^#]/ {
             for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
                 if ($1 ~ /:/) {
                     print $1
