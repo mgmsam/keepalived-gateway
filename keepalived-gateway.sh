@@ -348,28 +348,18 @@ parse_gateway_entry ()
         ;;
     esac
 
-    case "${GATEWAY:-}" in
-        *[.:]*)
-        ;;
-        *)
-            echo "invalid gateway: '$GATEWAY'"
-            return 2
-        ;;
-    esac
+    is_valid_ip "${GATEWAY:-}" || {
+        ERROR="gateway is not a valid IP address: '${GATEWAY:-}'"
+        return 1
+    }
 
     case "${INTERFACE:-}" in
         "")
             is_not_empty "${DEFAULT_INTERFACE:-}" || {
-                echo "missing interface for gateway: '$GATEWAY'"
-                return 2
+                ERROR="missing interface for gateway: '$GATEWAY'"
+                return 1
             }
             INTERFACE="$DEFAULT_INTERFACE"
-        ;;
-        *)
-            is_interface "$INTERFACE" || {
-                echo "network interface not found: '$INTERFACE'"
-                return 2
-            }
         ;;
     esac
 
@@ -378,8 +368,8 @@ parse_gateway_entry ()
             is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
         ;;
         *[!0123456789]*)
-            echo "invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
-            return 2
+            ERROR="invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
+            return 1
         ;;
         0*)
             METRIC="${METRIC#"${METRIC%%[!0]*}"}"
@@ -516,17 +506,15 @@ parse_gateway ()
     RETURN=0
     for GATEWAY
     do
-        parse_gateway_entry || continue
-
-        is_valid_ip "$GATEWAY" || {
-            echo "Error: Gateway is not a valid IP address: '$GATEWAY'"
+        parse_gateway_entry || {
+            echo "Error: variable 'GATEWAYS': $ERROR"
             RETURN=2
             continue
         }
 
         if is_local_ip "$GATEWAY" "$FAMILY"
         then
-            echo "Error: Gateway is a local address on this host: '$GATEWAY'"
+            echo "Error: variable 'GATEWAYS': gateway is a local address on this host: '$GATEWAY'"
             RETURN=2
             continue
         fi
@@ -541,7 +529,7 @@ parse_gateway ()
                 is_not_empty "${PING6:-}"
             ;;
         esac || {
-            echo "Error: Gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
+            echo "Error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
             RETURN=2
             continue
         }
@@ -557,7 +545,7 @@ parse_gateway ()
                     is_not_empty "${PING_IPV6:-}"
                 ;;
             esac || {
-                echo "Error: Gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
+                echo "Error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
                 RETURN=2
                 continue
             }
@@ -574,7 +562,7 @@ parse_gateway ()
                     is_not_empty "${SPEEDTEST_IPV6:-}"
                 ;;
             esac || {
-                echo "Error: Gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
+                echo "Error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
                 RETURN=2
                 continue
             }
@@ -1088,7 +1076,10 @@ maintain_route ()
                 CURRENT_METRIC="$METRIC"
             }
 
-            is_interface "$INTERFACE" || continue
+            is_interface "$INTERFACE" || {
+                echo "interface not found or down: '$INTERFACE'"
+                continue
+            }
 
             is_equal "$SPEEDTEST" yes && is_vrrp_master && evaluate_speed ||
             if is_empty "${BEST_ROUTE:-}"
@@ -1107,7 +1098,10 @@ maintain_route ()
             collect_route
         }
 
-        is_empty "${DEFAULT_GATEWAYS:-}" || break
+        is_empty "${DEFAULT_GATEWAYS:-}" || {
+            echo "Warning: no alive gateways available, retrying in 1s..."
+            break
+        }
         sleep 1
     done
 
