@@ -352,7 +352,7 @@ parse_gateway_entry ()
         *[.:]*)
         ;;
         *)
-            ERROR="invalid gateway: '$GATEWAY'"
+            echo "invalid gateway: '$GATEWAY'"
             return 2
         ;;
     esac
@@ -360,14 +360,14 @@ parse_gateway_entry ()
     case "${INTERFACE:-}" in
         "")
             is_not_empty "${DEFAULT_INTERFACE:-}" || {
-                ERROR="missing interface for gateway: '$GATEWAY'"
+                echo "missing interface for gateway: '$GATEWAY'"
                 return 2
             }
             INTERFACE="$DEFAULT_INTERFACE"
         ;;
         *)
             is_interface "$INTERFACE" || {
-                ERROR="network interface not found: '$INTERFACE'"
+                echo "network interface not found: '$INTERFACE'"
                 return 2
             }
         ;;
@@ -378,7 +378,7 @@ parse_gateway_entry ()
             is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
         ;;
         *[!0123456789]*)
-            ERROR="invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
+            echo "invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
             return 2
         ;;
         0*)
@@ -516,7 +516,7 @@ parse_gateway ()
     RETURN=0
     for GATEWAY
     do
-        parse_gateway_entry || return
+        parse_gateway_entry || continue
 
         is_valid_ip "$GATEWAY" || {
             echo "Error: Gateway is not a valid IP address: '$GATEWAY'"
@@ -532,11 +532,16 @@ parse_gateway ()
         fi
 
         case "$FAMILY" in
+            inet)
+                PROTO="IPv4"
+                is_not_empty "${PING4:-}"
+            ;;
             inet6)
+                PROTO="IPv6"
                 is_not_empty "${PING6:-}"
             ;;
         esac || {
-            echo "Error: Gateway '$GATEWAY' is '$FAMILY', but no compatible ping tool was found in the system."
+            echo "Error: Gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
             RETURN=2
             continue
         }
@@ -544,13 +549,15 @@ parse_gateway ()
         is_empty "${PING_HOST:-}" || {
             case "$FAMILY" in
                 inet)
+                    PROTO="IPv4"
                     is_not_empty "${PING_IPV4:-}"
                 ;;
                 inet6)
+                    PROTO="IPv6"
                     is_not_empty "${PING_IPV6:-}"
                 ;;
             esac || {
-                echo "Error: Gateway '$GATEWAY' is '$FAMILY', but PING_HOST has no '$FAMILY' address."
+                echo "Error: Gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
                 RETURN=2
                 continue
             }
@@ -559,13 +566,15 @@ parse_gateway ()
         is_empty "${SPEEDTEST_HOST:-}" || {
             case "$FAMILY" in
                 inet)
+                    PROTO="IPv4"
                     is_not_empty "${SPEEDTEST_IPV4:-}"
                 ;;
                 inet6)
+                    PROTO="IPv6"
                     is_not_empty "${SPEEDTEST_IPV6:-}"
                 ;;
             esac || {
-                echo "Error: Gateway '$GATEWAY' is '$FAMILY', but SPEEDTEST_HOST has no '$FAMILY' address."
+                echo "Error: Gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
                 RETURN=2
                 continue
             }
@@ -721,10 +730,7 @@ set_variables ()
             IFS="$IFS,"
             set -- $GATEWAYS
             IFS="$POSIX_IFS"
-            parse_gateway "$@" || {
-                echo "variable 'GATEWAYS': $ERROR"
-                return 2
-            }
+            parse_gateway "$@" || return
         ;;
         *)
             false
