@@ -212,7 +212,7 @@ parse_resource ()
             IPV6="$HOST"
         ;;
         *[a-zA-Z]*)
-            resolve_ips "$HOST"
+            resolve_ips "$HOST" || :
         ;;
         *)
             IPV4="$HOST"
@@ -794,12 +794,10 @@ collect_route ()
     BEST_ROUTE=""
 }
 
-is_not_vrrp_master ()
+is_vrrp_master ()
 {
-    is_not_empty "${VIRTUAL_IPADDRESS:-}" && {
-        is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" &&
-        return 1 || return 0
-    } >/dev/null 2>&1
+    is_empty   "${VIRTUAL_IPADDRESS:-}" ||
+    is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" >/dev/null 2>&1
 }
 
 get_time ()
@@ -840,6 +838,57 @@ speedtest ()
 check_ping ()
 {
     $TIMEOUT "${PING_TIMEOUT:=3}" $PING -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
+}
+
+evaluate_speed ()
+{
+    echo "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+
+    ip_route replace "$SPEEDTEST_ROUTE"
+    if speedtest "$SPEEDTEST_URL"
+    then
+        test "$BEST_SPEED" -ge "$BIT" || {
+            BEST_GATEWAY="$GATEWAY"
+            BEST_ROUTE="$ROUTE"
+            BEST_SPEED="$BIT"
+        }
+        ip_route del "$SPEEDTEST_ROUTE"
+        echo "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
+    else
+        ip_route del "$SPEEDTEST_ROUTE"
+        echo "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+        return 1
+    fi
+}
+
+evaluate_host ()
+{
+    echo "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
+
+    ip_route replace "$PING_ROUTE"
+    check_ping -I "$INTERFACE" "$PING_IP" && {
+        ip_route del "$PING_ROUTE"
+        echo "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+        BEST_GATEWAY="$GATEWAY"
+        BEST_ROUTE="$ROUTE"
+    } || {
+        ip_route del "$PING_ROUTE"
+        echo "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+        check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
+            echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
+            echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+    }
+}
+
+evaluate_gateway ()
+{
+    echo "probing gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+
+    check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
+        echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+        BEST_GATEWAY="$GATEWAY"
+        BEST_ROUTE="$ROUTE"
+    } || echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
 }
 
 add_route ()
@@ -978,77 +1027,47 @@ maintain_route ()
     BEST_ROUTE=""
     BEST_SPEED=0
 
-    for GATEWAY in $GATEWAYS
+    while :
     do
-        format_route
-        echo
-        echo "testing gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
 
-        is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
-            is_empty "${BEST_ROUTE:-}" || {
-                collect_gateway
-                collect_route
-                BEST_SPEED=0
-            }
-            is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
-            CURRENT_METRIC="$METRIC"
-        }
+        for GATEWAY in $GATEWAYS
+        do
+            format_route
+            echo
+            echo "testing gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
 
-        is_interface "$INTERFACE" || continue
-
-        is_equal "$SPEEDTEST" no || is_not_vrrp_master || {
-            echo "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
-
-            ip_route replace "$SPEEDTEST_ROUTE"
-            if speedtest "$SPEEDTEST_URL"
-            then
-                test "$BEST_SPEED" -ge "$BIT" || {
-                    BEST_GATEWAY="$GATEWAY"
-                    BEST_ROUTE="$ROUTE"
-                    BEST_SPEED="$BIT"
+            is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
+                is_empty "${BEST_ROUTE:-}" || {
+                    collect_gateway
+                    collect_route
+                    BEST_SPEED=0
                 }
-                ip_route del "$SPEEDTEST_ROUTE"
-                echo "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
-                continue
+                is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
+                CURRENT_METRIC="$METRIC"
+            }
+
+            is_interface "$INTERFACE" || continue
+
+            is_equal "$SPEEDTEST" yes && is_vrrp_master && evaluate_speed ||
+            if is_empty "${BEST_ROUTE:-}"
+            then
+                if is_not_empty "${PING_HOST:-}"
+                then
+                    evaluate_host
+                else
+                    evaluate_gateway
+                fi
             fi
-            ip_route del "$SPEEDTEST_ROUTE"
-            echo "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+        done
+
+        is_empty "${BEST_ROUTE:-}" || {
+            collect_gateway
+            collect_route
         }
 
-        is_empty "${BEST_ROUTE:-}" || continue
-
-        if is_not_empty "${PING_HOST:-}"
-        then
-            echo "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
-
-            ip_route replace "$PING_ROUTE"
-            check_ping -I "$INTERFACE" "$PING_IP" && {
-                ip_route del "$PING_ROUTE"
-                echo "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
-                BEST_GATEWAY="$GATEWAY"
-                BEST_ROUTE="$ROUTE"
-            } || {
-                ip_route del "$PING_ROUTE"
-                echo "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
-                check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
-                    echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
-                    echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
-            }
-        else
-            echo "probing gateway address: '$GATEWAY_IP' on '$INTERFACE'"
-
-            check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
-                echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
-                BEST_GATEWAY="$GATEWAY"
-                BEST_ROUTE="$ROUTE"
-            } || echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
-        fi
+        is_empty "${DEFAULT_GATEWAYS:-}" || break
+        sleep 1
     done
-
-    is_empty "${BEST_ROUTE:-}" || {
-        collect_gateway
-        collect_route
-    }
 
     add_route &&
     get_current_routes &&
