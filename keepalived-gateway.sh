@@ -925,9 +925,10 @@ is_metric_alive ()
 {
     case " $ALIVE_METRICS " in
         *" ${METRIC:-0} "*)
-            return 1
+            return 0
         ;;
     esac
+    return 1
 }
 
 is_failed_metric ()
@@ -1000,6 +1001,7 @@ evaluate_speed ()
     if speedtest "$SPEEDTEST_URL"
     then
         test "$BEST_SPEED" -ge "$BIT" || {
+            echo "SPEED [$BEST_SPEED < $BIT]"
             BEST_GATEWAY="$GATEWAY"
             BEST_ROUTE="$ROUTE"
             BEST_SPEED="$BIT"
@@ -1203,7 +1205,7 @@ reconcile_gateways ()
                     BEST_SPEED=0
                 }
                 is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
-                CURRENT_METRIC="$METRIC"
+                CURRENT_METRIC="${METRIC:-0}"
             }
 
             is_interface "$INTERFACE" || {
@@ -1445,7 +1447,6 @@ main ()
             check_gateways || {
                 reconcile_gateways
                 update_gateways_state
-                echo "DEFAULT_GATEWAYS [${DEFAULT_GATEWAYS:-}]"
             } && share_gateways || stop_share_gateways
         else
             fetch_gateways && sync_gateways || :
