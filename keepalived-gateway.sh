@@ -51,15 +51,42 @@ is_not_empty ()
     esac
 }
 
+is_digit ()
+{
+    case "${1:-}" in
+        *[!0123456789]*)
+            return 1
+    esac
+}
+
+is_dir ()
+{
+    test -d "${1:-}"
+}
+
 is_file ()
 {
     test -f "${1:-}"
 }
 
+is_port_free ()
+{
+    cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '
+        $2 ~ /:'"$(printf "%04X" "$1")"'$/ {
+            found = "yes"
+            exit
+        }
+        END {
+            if (found == "yes") exit 1
+            exit 0
+        }
+    '
+}
+
 check_dependencies ()
 {
     RETURN=0
-    for COMMAND in awk date ip ping sleep timeout wc
+    for COMMAND in awk date ip ping printf sleep timeout wc
     do
         type "$COMMAND" >/dev/null 2>&1 || {
             echo "dependency not found: '$COMMAND'" >&2
@@ -593,17 +620,32 @@ set_variables ()
     esac
     DEFAULT_METRIC="${METRIC:-}"
 
-    is_empty "${VIRTUAL_IPADDRESS:-}" || {
+    if is_not_empty "${VIRTUAL_IPADDRESS:-}"
+    then
         parse_resource "$VIRTUAL_IPADDRESS" && {
             is_valid_ip "${IPV4:-"$IPV6"}" && {
                 VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
                 VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+                is_not_empty "${GATEWAYS_SYNC_PORT:-}" || {
+                    echo "Error: variable 'GATEWAYS_SYNC_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
+                    return 2
+                }
+                is_digit "$GATEWAYS_SYNC_PORT" || {
+                    echo "Error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
+                    return 2
+                }
             }
+        } || {
+            echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
+            return 2
         }
-    } || {
-        echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
-        return 2
-    }
+        GATEWAYS_STATE_FILE="/tmp/gateways.state"
+    else
+        is_empty "${GATEWAYS_SYNC_PORT:-}" || is_digit "$GATEWAYS_SYNC_PORT" || {
+            echo "Error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
+            return 2
+        }
+    fi
 
     parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}" || return
     CHECK_INTERVAL="$INTERVAL"
@@ -826,7 +868,6 @@ collect_route ()
 
 is_vrrp_master ()
 {
-    is_empty   "${VIRTUAL_IPADDRESS:-}" ||
     is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" >/dev/null 2>&1
 }
 
@@ -1019,7 +1060,7 @@ check_gateways ()
         echo "checking active route: '$ROUTE'"
 
         is_interface "$INTERFACE" || {
-            echo "interface not found or down: '$INTERFACE'"
+            echo "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
             continue
         }
 
@@ -1048,7 +1089,15 @@ check_gateways ()
     is_equal "$ALIVE_COUNT" "$TOTAL_METRICS"
 }
 
-maintain_route ()
+refresh_routing_table ()
+{
+    add_route &&
+    get_current_routes &&
+    get_obsolete_routes &&
+    remove_obsolete_routes || :
+}
+
+reconcile_gateways ()
 {
     DEFAULT_GATEWAYS="${ALIVE_GATEWAYS:-}"
     DEFAULT_ROUTES="${ALIVE_ROUTES:-}"
@@ -1081,7 +1130,7 @@ maintain_route ()
                 continue
             }
 
-            is_equal "$SPEEDTEST" yes && is_vrrp_master && evaluate_speed ||
+            is_equal "$SPEEDTEST" yes && evaluate_speed ||
             if is_empty "${BEST_ROUTE:-}"
             then
                 if is_not_empty "${PING_HOST:-}"
@@ -1104,10 +1153,103 @@ maintain_route ()
         sleep 1
     done
 
-    add_route &&
-    get_current_routes &&
-    get_obsolete_routes &&
-    remove_obsolete_routes || :
+    refresh_routing_table
+}
+
+sync_gateways ()
+{
+    is_diff "${DEFAULT_GATEWAYS:-"${GATEWAYS:-}"}" "${GATEWAYS:-}" || {
+        echo "local routing state is already up to date"
+        return 0
+    }
+    echo "applying new gateway configuration from master: '$VIRTUAL_IPADDRESS'"
+    GATEWAYS="$DEFAULT_GATEWAYS"
+    DEFAULT_GATEWAYS=""
+
+    for GATEWAY in $GATEWAYS
+    do
+        format_route
+        echo
+        echo "configuring gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
+        is_interface "$INTERFACE" || {
+            echo "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
+            continue
+        }
+        BEST_ROUTE="$ROUTE"
+        collect_route
+    done
+
+    refresh_routing_table
+}
+
+update_gateways_state ()
+{
+    is_dir "${GATEWAYS_STATE_FILE%/*}" ||
+    ERROR="$(mkdir -p "${GATEWAYS_STATE_FILE%/*}" 2>&1)" || {
+        echo "Error: $ERROR"
+        return 1
+    }
+    echo "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
+    mv "$GATEWAYS_STATE_FILE.tmp" "$GATEWAYS_STATE_FILE"  || {
+        echo "failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
+        return 1
+    }
+}
+
+is_process_alive ()
+{
+    is_not_empty "${1:-}" &&
+    is_dir "/proc/$1"
+}
+
+share_gateways ()
+{
+    is_process_alive "${GATEWAY_SERVER_PID:-}" || {
+        is_port_free "$GATEWAYS_SYNC_PORT" || {
+            echo "Error: cannot start sync server, port $GATEWAYS_SYNC_PORT is busy"
+            return
+        }
+
+        telnetd -K -l : -p "$GATEWAYS_SYNC_PORT" -f "$GATEWAYS_STATE_FILE" 2>&1 &
+        GATEWAY_SERVER_PID=$!
+        sleep 1
+
+        if is_process_alive "$GATEWAY_SERVER_PID"
+        then
+            echo "gateway server successfully started on port $GATEWAYS_SYNC_PORT"
+        else
+            GATEWAY_SERVER_PID=""
+            echo "Error: gateway server failed to start (check system logs)"
+        fi
+    }
+}
+
+stop_share_gateways ()
+{
+    if is_process_alive "$GATEWAY_SERVER_PID"
+    then
+        kill "$GATEWAY_SERVER_PID" 2>/dev/null || :
+        GATEWAY_SERVER_PID=""
+        echo "gateway server stopped due to state file error"
+    fi
+}
+
+fetch_gateways ()
+{
+    DEFAULT_GATEWAYS="$(nc "$VIRTUAL_IPADDRESS" "$GATEWAYS_SYNC_PORT" 2>&1)" &&
+    DEFAULT_GATEWAYS="$(awk '
+        /=/ {
+            gsub(/\r/, "")
+            print
+        }
+    ' <<EOF
+$DEFAULT_GATEWAYS
+EOF
+    2>&1)" || {
+        echo "${DEFAULT_GATEWAYS:-}"
+        DEFAULT_GATEWAYS=""
+        return 1
+    }
 }
 
 main ()
@@ -1130,10 +1272,22 @@ main ()
     ALIVE_GATEWAYS=""
     ALIVE_METRICS=""
     ALIVE_ROUTES=""
+    GATEWAY_SERVER_PID=""
 
     while :
     do
-        check_gateways || maintain_route
+        if is_empty "${VIRTUAL_IPADDRESS:-}"
+        then
+            check_gateways || reconcile_gateways
+        elif is_vrrp_master
+        then
+            check_gateways || {
+                reconcile_gateways
+                update_gateways_state
+            } && share_gateways || stop_share_gateways
+        else
+            fetch_gateways && sync_gateways || :
+        fi
         echo "next check cycle in: '$HUMAN_INTERVAL'"
         sleep "$CHECK_INTERVAL"
     done
