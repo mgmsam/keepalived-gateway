@@ -120,6 +120,44 @@ check_dependencies ()
     fi >/dev/null 2>&1
 }
 
+detect_sync_transport ()
+{
+    RETURN=0
+
+    GATEWAYS_SERVER_DISPATCHER=""
+    GATEWAYS_CLIENT_DISPATCHER=""
+
+    for COMMAND in uhttpd telnetd
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
+            break
+        fi
+    done
+
+    for COMMAND in wget nc
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            GATEWAYS_CLIENT_DISPATCHER="fetch_gateways_$COMMAND"
+            break
+        fi
+    done
+
+    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" || {
+        echo "Error: no supported sync server found (uhttpd/telnetd required)"
+        RETURN=1
+    }
+
+    is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" || {
+        echo "Error: no supported sync client found (wget/nc required)"
+        RETURN=1
+    }
+
+    return "$RETURN"
+}
+
 include_config ()
 {
     CONFIG_FILE="/etc/keepalived-gateway.conf"
@@ -639,7 +677,8 @@ set_variables ()
             echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
             return 2
         }
-        GATEWAYS_STATE_FILE="/tmp/gateways.state"
+        detect_sync_transport || return 1
+        GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
     else
         is_empty "${GATEWAYS_SYNC_PORT:-}" || is_digit "$GATEWAYS_SYNC_PORT" || {
             echo "Error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
@@ -1202,6 +1241,16 @@ is_process_alive ()
     is_dir "/proc/$1"
 }
 
+serve_gateways_uhttpd ()
+{
+    uhttpd -p "$GATEWAYS_SYNC_PORT" -h "${GATEWAYS_STATE_FILE%/*}" -Rf
+}
+
+serve_gateways_telnetd ()
+{
+    telnetd -p "$GATEWAYS_SYNC_PORT" -f "$GATEWAYS_STATE_FILE" -l : -KF
+}
+
 share_gateways ()
 {
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
@@ -1210,7 +1259,7 @@ share_gateways ()
             return
         }
 
-        telnetd -K -l : -p "$GATEWAYS_SYNC_PORT" -f "$GATEWAYS_STATE_FILE" 2>&1 &
+        $GATEWAYS_SERVER_DISPATCHER 2>&1 &
         GATEWAY_SERVER_PID=$!
         sleep 1
 
@@ -1234,19 +1283,35 @@ stop_share_gateways ()
     fi
 }
 
+fetch_gateways_wget ()
+{
+    DEFAULT_GATEWAYS="$(
+        wget -q -O - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}" 2>/dev/null
+    )"
+}
+
+fetch_gateways_nc ()
+{
+    DEFAULT_GATEWAYS="$(
+        printf "GET /${GATEWAYS_STATE_FILE##*/} HTTP/1.0\r\n\r\n" | \
+        nc "${VIRTUAL_IPADDRESS%/*}" "$GATEWAYS_SYNC_PORT" 2>/dev/null
+    )"
+}
+
 fetch_gateways ()
 {
-    DEFAULT_GATEWAYS="$(nc "$VIRTUAL_IPADDRESS" "$GATEWAYS_SYNC_PORT" 2>&1)" &&
+    "$GATEWAYS_CLIENT_DISPATCHER" &&
     DEFAULT_GATEWAYS="$(awk '
         /=/ {
             gsub(/\r/, "")
             print
+            exit
         }
     ' <<EOF
 $DEFAULT_GATEWAYS
 EOF
     2>&1)" || {
-        echo "${DEFAULT_GATEWAYS:-}"
+        echo "Error: ${DEFAULT_GATEWAYS:-}"
         DEFAULT_GATEWAYS=""
         return 1
     }
