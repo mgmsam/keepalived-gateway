@@ -120,6 +120,42 @@ check_dependencies ()
     fi >/dev/null 2>&1
 }
 
+is_netcat_server_capable ()
+{
+    case "${NETCAT_STAT:-}" in
+        *not_a_port*)
+            case "$NETCAT_STAT" in
+                *[uU]sage*)
+                ;;
+                *)
+                    return
+                ;;
+            esac
+        ;;
+    esac
+    return 1
+}
+
+detect_netcat_server ()
+{
+    NETCAT=""
+    NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
+    if is_netcat_server_capable
+    then
+        NETCAT="nc -l -p"
+        return
+    fi
+
+    NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
+    if is_netcat_server_capable
+    then
+        NETCAT="nc -l"
+        return
+    fi
+
+    return 1
+}
+
 detect_sync_transport ()
 {
     RETURN=0
@@ -127,10 +163,11 @@ detect_sync_transport ()
     GATEWAYS_SERVER_DISPATCHER=""
     GATEWAYS_CLIENT_DISPATCHER=""
 
-    for COMMAND in uhttpd telnetd
+    for COMMAND in uhttpd telnetd nc
     do
         if type "$COMMAND" >/dev/null 2>&1
         then
+            is_diff "$COMMAND" "nc" || detect_netcat_server || break
             GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
             break
         fi
@@ -146,7 +183,7 @@ detect_sync_transport ()
     done
 
     is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" || {
-        echo "Error: no supported sync server found (uhttpd/telnetd required)"
+        echo "Error: no supported sync server found (uhttpd/telnetd/nc required)"
         RETURN=1
     }
 
@@ -672,6 +709,10 @@ set_variables ()
                     echo "Error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
                     return 2
                 }
+                is_port_free "$GATEWAYS_SYNC_PORT" || {
+                    echo "Error: cannot start sync server/client, port $GATEWAYS_SYNC_PORT is busy"
+                    return 2
+                }
             }
         } || {
             echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
@@ -842,8 +883,9 @@ remove_test_route ()
 clean_and_exit ()
 {
     EXIT="${1:-$?}"
-    trap - EXIT
+    trap - 0
     remove_test_route || RETURN=$?
+    is_empty "${GATEWAY_SERVER_PID:-}" || kill $GATEWAY_SERVER_PID 2>/dev/null
     is_equal "${EXIT:-}" 0 && exit "$RETURN" || exit "$EXIT"
 }
 
@@ -1241,6 +1283,29 @@ is_process_alive ()
     is_dir "/proc/$1"
 }
 
+serve_gateways_nc ()
+{
+    trap '
+        trap - 0
+        kill $NETCAT_PID 2>/dev/null
+        exit
+    ' 0 1 2 15
+
+    while :
+    do
+        $NETCAT "$GATEWAYS_SYNC_PORT" <<EOF >/dev/null 2>&1 &
+HTTP/1.1 200 OK$CR
+Content-Type: text/plain$CR
+Content-Length: ${#DEFAULT_GATEWAYS}$CR
+Connection: close$CR
+$CR
+$DEFAULT_GATEWAYS
+EOF
+        NETCAT_PID=$!
+        wait $NETCAT_PID 2>/dev/null
+    done
+}
+
 serve_gateways_uhttpd ()
 {
     uhttpd -p "$GATEWAYS_SYNC_PORT" -h "${GATEWAYS_STATE_FILE%/*}" -Rf
@@ -1293,14 +1358,43 @@ fetch_gateways_wget ()
 fetch_gateways_nc ()
 {
     DEFAULT_GATEWAYS="$(
-        printf "GET /${GATEWAYS_STATE_FILE##*/} HTTP/1.0\r\n\r\n" | \
-        nc "${VIRTUAL_IPADDRESS%/*}" "$GATEWAYS_SYNC_PORT" 2>/dev/null
-    )"
+        $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$GATEWAYS_SYNC_PORT" <<EOF 2>&1
+GET /${GATEWAYS_STATE_FILE##*/} HTTP/1.0$CR
+Host: ${VIRTUAL_IPADDRESS%/*}$CR
+Connection: close$CR
+$CR
+EOF
+    )" ||
+    case $? in
+        124)
+            return 0
+        ;;
+        *)
+            return $?
+        ;;
+    esac
 }
 
 fetch_gateways ()
 {
-    "$GATEWAYS_CLIENT_DISPATCHER" &&
+    COUNT=0
+    RETRIES=3
+    SUCCESS=1
+
+    while is_diff $COUNT $RETRIES
+    do
+        "$GATEWAYS_CLIENT_DISPATCHER" && {
+            SUCCESS=0
+            break
+        } || COUNT=$((COUNT + 1))
+    done
+
+    is_equal $SUCCESS 0 || {
+        echo "Error: ${DEFAULT_GATEWAYS:-}"
+        DEFAULT_GATEWAYS=""
+        return 1
+    }
+
     DEFAULT_GATEWAYS="$(awk '
         /=/ {
             gsub(/\r/, "")
@@ -1310,15 +1404,17 @@ fetch_gateways ()
     ' <<EOF
 $DEFAULT_GATEWAYS
 EOF
-    2>&1)" || {
-        echo "Error: ${DEFAULT_GATEWAYS:-}"
-        DEFAULT_GATEWAYS=""
+    )"
+
+    is_not_empty "${DEFAULT_GATEWAYS:-}" || {
+        echo "Error: received empty or invalid gateway state"
         return 1
     }
 }
 
 main ()
 {
+    CR="$(printf "\r")"
     LF="
 "
     POSIX_IFS="$(printf " \t")$LF"
@@ -1349,6 +1445,7 @@ main ()
             check_gateways || {
                 reconcile_gateways
                 update_gateways_state
+                echo "DEFAULT_GATEWAYS [${DEFAULT_GATEWAYS:-}]"
             } && share_gateways || stop_share_gateways
         else
             fetch_gateways && sync_gateways || :
