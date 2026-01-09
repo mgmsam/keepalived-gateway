@@ -1001,7 +1001,6 @@ evaluate_speed ()
     if speedtest "$SPEEDTEST_URL"
     then
         test "$BEST_SPEED" -ge "$BIT" || {
-            echo "SPEED [$BEST_SPEED < $BIT]"
             BEST_GATEWAY="$GATEWAY"
             BEST_ROUTE="$ROUTE"
             BEST_SPEED="$BIT"
@@ -1204,7 +1203,10 @@ reconcile_gateways ()
                     collect_route
                     BEST_SPEED=0
                 }
-                is_empty "${ALIVE_METRICS:-}" || is_failed_metric || continue
+                is_empty "${ALIVE_METRICS:-}" || is_failed_metric || {
+                    echo "skipping gateway: active route already found with metric '$CURRENT_METRIC'"
+                    continue
+                }
                 CURRENT_METRIC="${METRIC:-0}"
             }
 
@@ -1241,15 +1243,13 @@ reconcile_gateways ()
 
 sync_gateways ()
 {
-    is_diff "${DEFAULT_GATEWAYS:-"${GATEWAYS:-}"}" "${GATEWAYS:-}" || {
+    is_diff "${FETCHED_GATEWAYS:-}" "${DEFAULT_GATEWAYS:-}" || {
         echo "local routing state is already up to date"
         return 0
     }
-    echo "applying new gateway configuration from master: '$VIRTUAL_IPADDRESS'"
-    GATEWAYS="$DEFAULT_GATEWAYS"
-    DEFAULT_GATEWAYS=""
+    echo "applying new gateway configuration from master (${VIRTUAL_IPADDRESS%/*})"
 
-    for GATEWAY in $GATEWAYS
+    for GATEWAY in $FETCHED_GATEWAYS
     do
         format_route
         echo
@@ -1258,7 +1258,9 @@ sync_gateways ()
             echo "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
             continue
         }
+        BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
+        collect_gateway
         collect_route
     done
 
@@ -1352,15 +1354,15 @@ stop_share_gateways ()
 
 fetch_gateways_wget ()
 {
-    DEFAULT_GATEWAYS="$(
-        wget -q -O - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}" 2>/dev/null
+    FETCHED_GATEWAYS="$(
+        2>&1 wget -O - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
 fetch_gateways_nc ()
 {
-    DEFAULT_GATEWAYS="$(
-        $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$GATEWAYS_SYNC_PORT" <<EOF 2>&1
+    FETCHED_GATEWAYS="$(
+        2>&1 $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$GATEWAYS_SYNC_PORT" <<EOF
 GET /${GATEWAYS_STATE_FILE##*/} HTTP/1.0$CR
 Host: ${VIRTUAL_IPADDRESS%/*}$CR
 Connection: close$CR
@@ -1382,7 +1384,8 @@ fetch_gateways ()
     COUNT=0
     RETRIES=3
     SUCCESS=1
-
+    echo
+    echo "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
     while is_diff $COUNT $RETRIES
     do
         "$GATEWAYS_CLIENT_DISPATCHER" && {
@@ -1392,26 +1395,27 @@ fetch_gateways ()
     done
 
     is_equal $SUCCESS 0 || {
-        echo "Error: ${DEFAULT_GATEWAYS:-}"
-        DEFAULT_GATEWAYS=""
+        echo "Error: ${FETCHED_GATEWAYS:-}"
+        FETCHED_GATEWAYS=""
         return 1
     }
 
-    DEFAULT_GATEWAYS="$(awk '
+    FETCHED_GATEWAYS="$(awk '
         /=/ {
             gsub(/\r/, "")
             print
             exit
         }
     ' <<EOF
-$DEFAULT_GATEWAYS
+$FETCHED_GATEWAYS
 EOF
     )"
 
-    is_not_empty "${DEFAULT_GATEWAYS:-}" || {
-        echo "Error: received empty or invalid gateway state"
+    is_not_empty "${FETCHED_GATEWAYS:-}" || {
+        echo "Error: received empty or invalid gateway state from master (${VIRTUAL_IPADDRESS%/*})"
         return 1
     }
+    echo "received remote state from master (${VIRTUAL_IPADDRESS%/*}): [$FETCHED_GATEWAYS]"
 }
 
 main ()
