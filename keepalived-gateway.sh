@@ -173,7 +173,7 @@ detect_sync_transport ()
         fi
     done
 
-    for COMMAND in wget nc
+    for COMMAND in wget curl nc
     do
         if type "$COMMAND" >/dev/null 2>&1
         then
@@ -188,7 +188,7 @@ detect_sync_transport ()
     }
 
     is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" || {
-        echo "Error: no supported sync client found (wget/nc required)"
+        echo "Error: no supported sync client found (wget/curl/nc required)"
         RETURN=1
     }
 
@@ -1356,6 +1356,13 @@ fetch_gateways_wget ()
 {
     FETCHED_GATEWAYS="$(
         2>&1 wget -O - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
+    )"
+}
+
+fetch_gateways_curl ()
+{
+    FETCHED_GATEWAYS="$(
+        2>&1 curl -s -S -L "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
