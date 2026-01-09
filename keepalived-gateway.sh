@@ -771,7 +771,7 @@ set_variables ()
                     return 2
                 ;;
                 wget)
-                    DOWNLOAD_OPTIONS="-q -O -"
+                    DOWNLOAD_OPTIONS="-O -"
                     case "${SCHEME:-}" in
                         https)
                             case "$(wget --help 2>&1)" in
@@ -790,7 +790,7 @@ set_variables ()
                     esac
                 ;;
                 curl)
-                    DOWNLOAD_OPTIONS="-s -L -o -"
+                    DOWNLOAD_OPTIONS="-o -"
                     case "${SCHEME:-}" in
                         https)
                             case "$(curl --help all 2>&1 || curl --help 2>&1)" in
@@ -978,7 +978,7 @@ speedtest ()
 {
     START_SPEEDTEST="$(get_time)"
     BYTE="$(
-        $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
+        2>/dev/null $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
         $DOWNLOAD_CMD $DOWNLOAD_INET $DOWNLOAD_OPTIONS "$SPEEDTEST_URL" | wc -c
     )"
     END_SPEEDTEST="$(get_time)"
@@ -1362,7 +1362,7 @@ fetch_gateways_wget ()
 fetch_gateways_curl ()
 {
     FETCHED_GATEWAYS="$(
-        2>&1 curl -s -S -L "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
+        2>&1 curl -o - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
