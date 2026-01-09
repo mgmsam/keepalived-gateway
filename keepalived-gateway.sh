@@ -69,6 +69,77 @@ is_file ()
     test -f "${1:-}"
 }
 
+is_term ()
+{
+    test -t "${1:-1}" && IS_TERM=0 || IS_TERM=1
+    return "$IS_TERM"
+}
+
+if is_not_empty "${KSH_VERSION:-}"
+then
+    PUTS=print
+    puts ()
+    {
+        print "${PUTS_OPTIONS:--r}" -- "$*"
+    }
+else
+    if type printf >/dev/null 2>&1
+    then
+        PUTS=printf
+        puts ()
+        {
+            printf "${PUTS_OPTIONS:-%s\n}" "$*"
+        }
+    elif type echo >/dev/null 2>&1
+    then
+        PUTS=echo
+        puts ()
+        {
+            echo "${PUTS_OPTIONS:-}" "$*"
+        }
+    else
+        exit 1
+    fi
+fi
+
+say ()
+{
+    SAY_RETURN=$?
+    PUTS_OPTIONS=""
+    while is_diff $# 0
+    do
+        case "${1:-}" in
+            -n)
+                is_equal "$PUTS" printf &&
+                    PUTS_OPTIONS=%s ||
+                    PUTS_OPTIONS=-n
+            ;;
+            *[!0123456789]* | "")
+                break
+            ;;
+            *)
+                SAY_RETURN=$1
+            ;;
+        esac
+        shift
+    done
+    is_empty "$*" || {
+        puts "${LOG_PREFIX:="${0##*/}"}:${1:+" $*"}"
+        PUTS_OPTIONS=
+    }
+}
+
+die ()
+{
+    say "$@" >&2
+    exit "$SAY_RETURN"
+}
+
+is_interface ()
+{
+    ip link show ${1:-} >/dev/null 2>&1
+}
+
 is_port_free ()
 {
     cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '
@@ -89,11 +160,11 @@ check_dependencies ()
     for COMMAND in awk date ip ping printf sleep timeout wc
     do
         type "$COMMAND" >/dev/null 2>&1 || {
-            echo "dependency not found: '$COMMAND'" >&2
-            RETURN=1
+            say "dependency not found: '$COMMAND'" >&2
+            RETURN="$SAY_RETURN"
         }
     done
-    is_equal "$RETURN" 0 || return "$RETURN"
+    is_equal "$RETURN" 0 || die "$RETURN"
 
     if ping -4 -c 1 -w 1 127.0.0.1
     then
@@ -120,113 +191,11 @@ check_dependencies ()
     fi >/dev/null 2>&1
 }
 
-is_netcat_server_capable ()
-{
-    case "${NETCAT_STAT:-}" in
-        *not_a_port*)
-            case "$NETCAT_STAT" in
-                *[uU]sage*)
-                ;;
-                *)
-                    return
-                ;;
-            esac
-        ;;
-    esac
-    return 1
-}
-
-detect_netcat_server ()
-{
-    NETCAT=""
-    NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
-    if is_netcat_server_capable
-    then
-        NETCAT="nc -l -p"
-        return
-    fi
-
-    NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
-    if is_netcat_server_capable
-    then
-        NETCAT="nc -l"
-        return
-    fi
-
-    return 1
-}
-
-detect_sync_transport ()
-{
-    RETURN=0
-
-    GATEWAYS_SERVER_DISPATCHER=""
-    GATEWAYS_CLIENT_DISPATCHER=""
-
-    for COMMAND in uhttpd telnetd nc
-    do
-        if type "$COMMAND" >/dev/null 2>&1
-        then
-            is_diff "$COMMAND" "nc" || detect_netcat_server || break
-            GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
-            break
-        fi
-    done
-
-    for COMMAND in wget curl nc
-    do
-        if type "$COMMAND" >/dev/null 2>&1
-        then
-            GATEWAYS_CLIENT_DISPATCHER="fetch_gateways_$COMMAND"
-            break
-        fi
-    done
-
-    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" || {
-        echo "Error: no supported sync server found (uhttpd/telnetd/nc required)"
-        RETURN=1
-    }
-
-    is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" || {
-        echo "Error: no supported sync client found (wget/curl/nc required)"
-        RETURN=1
-    }
-
-    return "$RETURN"
-}
-
 include_config ()
 {
     CONFIG_FILE="/etc/keepalived-gateway.conf"
-
-    is_file "$CONFIG_FILE" || {
-        echo "no such config file: '$CONFIG_FILE'"
-        return 1
-    }
-
-    . "$CONFIG_FILE" || return
-}
-
-is_interface ()
-{
-    ip link show ${1:-} >/dev/null 2>&1
-}
-
-get_family_address ()
-{
-    case "${1:-}" in
-        "")
-        ;;
-        *:*:*)
-            FAMILY=inet6
-        ;;
-        *.*)
-            FAMILY=inet
-        ;;
-        *)
-            return 1
-        ;;
-    esac
+    is_file "$CONFIG_FILE" || die "error: no such config file: '$CONFIG_FILE'"
+          . "$CONFIG_FILE" || die
 }
 
 resolve_ips ()
@@ -392,12 +361,80 @@ is_valid_ip ()
     esac
 }
 
+is_netcat_server_capable ()
+{
+    case "${NETCAT_STAT:-}" in
+        *not_a_port*)
+            case "$NETCAT_STAT" in
+                *[uU]sage*)
+                ;;
+                *)
+                    return
+                ;;
+            esac
+        ;;
+    esac
+    return 1
+}
+
+detect_netcat_server ()
+{
+    NETCAT=""
+    NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
+    if is_netcat_server_capable
+    then
+        NETCAT="nc -l -p"
+        return
+    fi
+
+    NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
+    if is_netcat_server_capable
+    then
+        NETCAT="nc -l"
+        return
+    fi
+
+    return 1
+}
+
+detect_sync_transport ()
+{
+    RETURN=0
+
+    GATEWAYS_SERVER_DISPATCHER=""
+    GATEWAYS_CLIENT_DISPATCHER=""
+
+    for COMMAND in uhttpd telnetd nc
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            is_diff "$COMMAND" "nc" || detect_netcat_server || break
+            GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
+            break
+        fi
+    done
+
+    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+        die "error: no supported sync server found (uhttpd/telnetd/nc required)"
+
+    for COMMAND in wget curl nc
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            GATEWAYS_CLIENT_DISPATCHER="fetch_gateways_$COMMAND"
+            break
+        fi
+    done
+
+    is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" ||
+        die "error: no supported sync client found (wget/curl/nc required)"
+}
+
 parse_interval ()
 {
     case "${2%[smhdwMy]}" in
         "" | *[!0123456789]*)
-            echo "variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
-            return 2
+            die 2 "error: variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
         ;;
     esac
     case "$2" in
@@ -609,14 +646,14 @@ parse_gateway ()
     for GATEWAY
     do
         parse_gateway_entry || {
-            echo "Error: variable 'GATEWAYS': $ERROR"
+            say "error: variable 'GATEWAYS': $ERROR"
             RETURN=2
             continue
         }
 
         if is_local_ip "$GATEWAY" "$FAMILY"
         then
-            echo "Error: variable 'GATEWAYS': gateway is a local address on this host: '$GATEWAY'"
+            say "error: variable 'GATEWAYS': gateway is a local address on this host: '$GATEWAY'"
             RETURN=2
             continue
         fi
@@ -631,7 +668,7 @@ parse_gateway ()
                 is_not_empty "${PING6:-}"
             ;;
         esac || {
-            echo "Error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
+            say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
             RETURN=2
             continue
         }
@@ -647,7 +684,7 @@ parse_gateway ()
                     is_not_empty "${PING_IPV6:-}"
                 ;;
             esac || {
-                echo "Error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
+                say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
                 RETURN=2
                 continue
             }
@@ -664,7 +701,7 @@ parse_gateway ()
                     is_not_empty "${SPEEDTEST_IPV6:-}"
                 ;;
             esac || {
-                echo "Error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
+                say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
                 RETURN=2
                 continue
             }
@@ -672,8 +709,8 @@ parse_gateway ()
 
         GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
         collect_interface
-    done
-    is_equal "$RETURN" 0 || return "$RETURN"
+    done >&2
+    is_equal "$RETURN" 0 || die "$RETURN"
     GATEWAYS="$(optimize_gateways)"
     TOTAL_METRICS="$(count_metrics)"
 }
@@ -681,13 +718,12 @@ parse_gateway ()
 set_variables ()
 {
     is_interface ${INTERFACE:-} ||
-    echo "Warning: variable 'INTERFACE': network interface not found: '$INTERFACE'"
+        say "WARNING: variable 'INTERFACE': network interface not found: '$INTERFACE'"
     DEFAULT_INTERFACE="${INTERFACE:-}"
 
     case "${METRIC:=0}" in
         *[!0123456789]*)
-            echo "variable 'METRIC': invalid route metric: '$METRIC'"
-            return 2
+            die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
         ;;
         0*)
             METRIC="${METRIC#"${METRIC%%[!0]*}"}"
@@ -701,33 +737,22 @@ set_variables ()
             is_valid_ip "${IPV4:-"$IPV6"}" && {
                 VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
                 VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
-                is_not_empty "${GATEWAYS_SYNC_PORT:-}" || {
-                    echo "Error: variable 'GATEWAYS_SYNC_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
-                    return 2
-                }
-                is_digit "$GATEWAYS_SYNC_PORT" || {
-                    echo "Error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
-                    return 2
-                }
-                is_port_free "$GATEWAYS_SYNC_PORT" || {
-                    echo "Error: cannot start sync server/client, port $GATEWAYS_SYNC_PORT is busy"
-                    return 2
-                }
+                is_not_empty "${GATEWAYS_SYNC_PORT:-}" ||
+                    die 2 "error: variable 'GATEWAYS_SYNC_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
+                is_digit "$GATEWAYS_SYNC_PORT" ||
+                    die 2 "error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
+                is_port_free "$GATEWAYS_SYNC_PORT" ||
+                    die 2 "error: cannot start sync server/client, port $GATEWAYS_SYNC_PORT is busy"
             }
-        } || {
-            echo "variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
-            return 2
-        }
-        detect_sync_transport || return 1
+        } || die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
+        detect_sync_transport
         GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
     else
-        is_empty "${GATEWAYS_SYNC_PORT:-}" || is_digit "$GATEWAYS_SYNC_PORT" || {
-            echo "Error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
-            return 2
-        }
+        is_empty "${GATEWAYS_SYNC_PORT:-}" || is_digit "$GATEWAYS_SYNC_PORT" ||
+            die 2 "error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
     fi
 
-    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}" || return
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}"
     CHECK_INTERVAL="$INTERVAL"
     HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
 
@@ -739,26 +764,21 @@ set_variables ()
             SPEEDTEST=yes
         ;;
         *)
-            echo "variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
-            return 2
+            die 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
         ;;
     esac
 
     is_empty "${PING_HOST:-}" || {
-        parse_resource "$PING_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
-            echo "Error: Failed to resolve PING_HOST IP: '$PING_HOST'"
-            return 2
-        }
+        parse_resource "$PING_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" ||
+            die "error: failed to resolve PING_HOST IP: '$PING_HOST'"
         PING_IPV4="${IPV4:-}"
         PING_IPV6="${IPV6:-}"
     }
 
     is_equal "$SPEEDTEST" "no" || {
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
-            parse_resource "$SPEEDTEST_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" || {
-                echo "Error: Failed to resolve SPEEDTEST_HOST IP: '$SPEEDTEST_HOST'"
-                return 2
-            }
+            parse_resource "$SPEEDTEST_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" ||
+                die "error: failed to resolve SPEEDTEST_HOST IP: '$SPEEDTEST_HOST'"
 
             for DOWNLOAD_CMD in wget curl
             do
@@ -767,8 +787,7 @@ set_variables ()
 
             case "${DOWNLOAD_CMD:-}" in
                 "")
-                    echo "Error: Speedtest requires 'wget' or 'curl', but neither was found." >&2
-                    return 2
+                    die 1 "error: speedtest requires 'wget' or 'curl', but neither was found."
                 ;;
                 wget)
                     DOWNLOAD_OPTIONS="-O -"
@@ -779,7 +798,7 @@ set_variables ()
                                     DOWNLOAD_OPTIONS="--no-check-certificate $DOWNLOAD_OPTIONS"
                                 ;;
                                 *)
-                                    echo "Warning: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
+                                    say "WARNING: HTTPS speedtest requested, but wget lacks SSL support. Switching to HTTP."
                                     SCHEME=http
                                 ;;
                             esac
@@ -798,7 +817,7 @@ set_variables ()
                                     DOWNLOAD_OPTIONS="-k $DOWNLOAD_OPTIONS"
                                 ;;
                                 *)
-                                    echo "Warning: HTTPS speedtest requested, but curl lacks SSL support. Switching to HTTP."
+                                    say "WARNING: HTTPS speedtest requested, but curl lacks SSL support. Switching to HTTP."
                                     SCHEME=http
                                 ;;
                             esac
@@ -816,8 +835,7 @@ set_variables ()
                     SPEEDTEST_AUTHORITY_IPV6="${IPV6:+"$HOST"}"
                 ;;
                 *[!0-9]*)
-                    echo "Error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
-                    return 2
+                    die 2 "error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
                 ;;
                 *)
                     SPEEDTEST_HOST_IPV4="${IPV4:+"$HOST:$PORT"}"
@@ -840,15 +858,12 @@ set_variables ()
             IFS="$IFS,"
             set -- $GATEWAYS
             IFS="$POSIX_IFS"
-            parse_gateway "$@" || return
+            parse_gateway "$@"
         ;;
         *)
             false
         ;;
-    esac || {
-        echo "variable 'GATEWAYS': no valid gateways found: '$GATEWAYS'"
-        return 2
-    }
+    esac || die 2 "error: variable 'GATEWAYS': no valid gateways found: '${GATEWAYS:-}'"
 }
 
 ip_route ()
@@ -995,7 +1010,7 @@ check_ping ()
 
 evaluate_speed ()
 {
-    echo "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+    say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
 
     ip_route replace "$SPEEDTEST_ROUTE"
     if speedtest "$SPEEDTEST_URL"
@@ -1006,49 +1021,49 @@ evaluate_speed ()
             BEST_SPEED="$BIT"
         }
         ip_route del "$SPEEDTEST_ROUTE"
-        echo "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
+        say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
     else
         ip_route del "$SPEEDTEST_ROUTE"
-        echo "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+        say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
         return 1
     fi
 }
 
 evaluate_host ()
 {
-    echo "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
+    say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
 
     ip_route replace "$PING_ROUTE"
     check_ping -I "$INTERFACE" "$PING_IP" && {
         ip_route del "$PING_ROUTE"
-        echo "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+        say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
     } || {
         ip_route del "$PING_ROUTE"
-        echo "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+        say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
-            echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
-            echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+            say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
+            say "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
     }
 }
 
 evaluate_gateway ()
 {
-    echo "probing gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+    say "probing gateway address: '$GATEWAY_IP' on '$INTERFACE'"
 
     check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
-        echo "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+        say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
-    } || echo "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+    } || say "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
 }
 
 add_route ()
 {
     is_not_empty "${DEFAULT_ROUTES:-}" || return
     echo
-    echo "applying optimized routes to the system..."
+    say "applying optimized routes to the system..."
     while read ROUTE
     do
         ip_route replace "$ROUTE" || :
@@ -1117,7 +1132,7 @@ remove_obsolete_routes ()
 {
     is_not_empty "${REMOVE_ROUTES:-}" || return
     echo
-    echo "removing obsolete routes from the system..."
+    say "removing obsolete routes from the system..."
     while read ROUTE
     do
         ip_route del "$ROUTE"
@@ -1139,10 +1154,10 @@ check_gateways ()
     do
         format_route
         echo
-        echo "checking active route: '$ROUTE'"
+        say "checking active route: '$ROUTE'"
 
         is_interface "$INTERFACE" || {
-            echo "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
+            say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
             continue
         }
 
@@ -1151,17 +1166,17 @@ check_gateways ()
             ip_route replace "$PING_ROUTE"
             check_ping -I "$INTERFACE" "$PING_IP" || {
                 ip_route del "$PING_ROUTE"
-                echo "host '$PING_HOST' is unreachable via route '$ROUTE'"
+                say "host '$PING_HOST' is unreachable via route '$ROUTE'"
                 continue
             }
             ip_route del "$PING_ROUTE"
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
-                echo "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
+                say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
                 continue
             }
         fi
-        echo "alive active route: '$ROUTE'"
+        say "alive active route: '$ROUTE'"
 
         ALIVE_COUNT="$((ALIVE_COUNT + 1))"
         ALIVE_GATEWAYS="${ALIVE_GATEWAYS:+"$ALIVE_GATEWAYS "}$GATEWAY"
@@ -1195,7 +1210,7 @@ reconcile_gateways ()
         do
             format_route
             echo
-            echo "testing gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
+            say "testing gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
 
             is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
                 is_empty "${BEST_ROUTE:-}" || {
@@ -1204,14 +1219,14 @@ reconcile_gateways ()
                     BEST_SPEED=0
                 }
                 is_empty "${ALIVE_METRICS:-}" || is_failed_metric || {
-                    echo "skipping gateway: active route already found with metric '$CURRENT_METRIC'"
+                    say "skipping gateway: active route already found with metric '$CURRENT_METRIC'"
                     continue
                 }
                 CURRENT_METRIC="${METRIC:-0}"
             }
 
             is_interface "$INTERFACE" || {
-                echo "interface not found or down: '$INTERFACE'"
+                say "interface not found or down: '$INTERFACE'"
                 continue
             }
 
@@ -1234,7 +1249,7 @@ reconcile_gateways ()
 
         is_empty "${DEFAULT_GATEWAYS:-}" || break
 
-        echo "Warning: no alive gateways available, retrying in 1s..."
+        say "WARNING: no alive gateways available, retrying in 1s..."
         sleep 1
     done
 
@@ -1244,18 +1259,18 @@ reconcile_gateways ()
 sync_gateways ()
 {
     is_diff "${FETCHED_GATEWAYS:-}" "${DEFAULT_GATEWAYS:-}" || {
-        echo "local routing state is already up to date"
+        say "local routing state is already up to date"
         return 0
     }
-    echo "applying new gateway configuration from master (${VIRTUAL_IPADDRESS%/*})"
+    say "applying new gateway configuration from master (${VIRTUAL_IPADDRESS%/*})"
 
     for GATEWAY in $FETCHED_GATEWAYS
     do
         format_route
         echo
-        echo "configuring gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
+        say "configuring gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
         is_interface "$INTERFACE" || {
-            echo "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
+            say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
             continue
         }
         BEST_GATEWAY="$GATEWAY"
@@ -1270,15 +1285,15 @@ sync_gateways ()
 update_gateways_state ()
 {
     is_dir "${GATEWAYS_STATE_FILE%/*}" ||
-    ERROR="$(mkdir -p "${GATEWAYS_STATE_FILE%/*}" 2>&1)" || {
-        echo "Error: $ERROR"
+    ERROR="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" || {
+        say "error: $ERROR"
         return 1
-    }
+    } >&2
     echo "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
     mv "$GATEWAYS_STATE_FILE.tmp" "$GATEWAYS_STATE_FILE"  || {
-        echo "failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
+        say "error: failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
         return 1
-    }
+    } >&2
 }
 
 is_process_alive ()
@@ -1324,9 +1339,9 @@ share_gateways ()
 {
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
         is_port_free "$GATEWAYS_SYNC_PORT" || {
-            echo "Error: cannot start sync server, port $GATEWAYS_SYNC_PORT is busy"
+            say "error: cannot start sync server, port $GATEWAYS_SYNC_PORT is busy"
             return
-        }
+        } >&2
 
         $GATEWAYS_SERVER_DISPATCHER 2>&1 &
         GATEWAY_SERVER_PID=$!
@@ -1334,11 +1349,11 @@ share_gateways ()
 
         if is_process_alive "$GATEWAY_SERVER_PID"
         then
-            echo "gateway server successfully started on port $GATEWAYS_SYNC_PORT"
+            say "gateway server successfully started on port $GATEWAYS_SYNC_PORT"
         else
             GATEWAY_SERVER_PID=""
-            echo "Error: gateway server failed to start (check system logs)"
-        fi
+            say "error: gateway server failed to start (check system logs)"
+        fi >&2
     }
 }
 
@@ -1348,7 +1363,7 @@ stop_share_gateways ()
     then
         kill "$GATEWAY_SERVER_PID" 2>/dev/null || :
         GATEWAY_SERVER_PID=""
-        echo "gateway server stopped due to state file error"
+        say "gateway server stopped"
     fi
 }
 
@@ -1392,7 +1407,7 @@ fetch_gateways ()
     RETRIES=3
     SUCCESS=1
     echo
-    echo "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
+    say "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
     while is_diff $COUNT $RETRIES
     do
         "$GATEWAYS_CLIENT_DISPATCHER" && {
@@ -1402,10 +1417,10 @@ fetch_gateways ()
     done
 
     is_equal $SUCCESS 0 || {
-        echo "Error: ${FETCHED_GATEWAYS:-}"
+        say "error: ${FETCHED_GATEWAYS:-}"
         FETCHED_GATEWAYS=""
         return 1
-    }
+    } >&2
 
     FETCHED_GATEWAYS="$(awk '
         /=/ {
@@ -1419,10 +1434,10 @@ EOF
     )"
 
     is_not_empty "${FETCHED_GATEWAYS:-}" || {
-        echo "Error: received empty or invalid gateway state from master (${VIRTUAL_IPADDRESS%/*})"
+        say "error: received empty or invalid gateway state from master (${VIRTUAL_IPADDRESS%/*})"
         return 1
-    }
-    echo "received remote state from master (${VIRTUAL_IPADDRESS%/*}): [$FETCHED_GATEWAYS]"
+    } >&2
+    say "received remote state from master (${VIRTUAL_IPADDRESS%/*}): [$FETCHED_GATEWAYS]"
 }
 
 main ()
@@ -1433,15 +1448,19 @@ main ()
     POSIX_IFS="$(printf " \t")$LF"
     IFS="$POSIX_IFS"
 
-    check_dependencies &&
-    include_config &&
-    set_variables &&
-    remove_test_route || return
+    LOG_PREFIX="kg [init]"
 
-    trap 'clean_and_exit' 0       # EXIT (0) : Naturally occurring script termination.
-    trap 'clean_and_exit 129' 1   # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
-    trap 'clean_and_exit 130' 2   # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
-    trap 'clean_and_exit 143' 15  # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
+    check_dependencies
+    include_config
+    set_variables
+    remove_test_route || die
+
+    trap 'clean_and_exit' 0      # EXIT (0) : Naturally occurring script termination.
+    trap 'clean_and_exit 129' 1  # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
+    trap 'clean_and_exit 130' 2  # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
+    trap 'clean_and_exit 143' 15 # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
+
+    LOG_PREFIX="kg [single]"
 
     ALIVE_GATEWAYS=""
     ALIVE_METRICS=""
@@ -1455,14 +1474,16 @@ main ()
             check_gateways || reconcile_gateways
         elif is_vrrp_master
         then
+            LOG_PREFIX="kg [master]"
             check_gateways || {
                 reconcile_gateways
                 update_gateways_state
             } && share_gateways || stop_share_gateways
         else
+            LOG_PREFIX="kg [slave]"
             fetch_gateways && sync_gateways || :
         fi
-        echo "next check cycle in: '$HUMAN_INTERVAL'"
+        say "next check cycle in: '$HUMAN_INTERVAL'"
         sleep "$CHECK_INTERVAL"
     done
 }
