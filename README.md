@@ -72,7 +72,9 @@ The script dynamically adapts its behavior based on the node's role:
 | VIRTUAL_IPADDRESS  | VIP (CIDR) used to determine Master/Slave role.     | 192.168.1.1/24
 | GATEWAYS_SYNC_PORT | Network port for gateway list synchronization.      | 8888
 
-> _**Note**: The script fully supports dual-stack environments. Gateway addresses, PING_HOST, SPEEDTEST_HOST and VIRTUAL_IPADDRESS can be defined using either IPv4 or IPv6. The health checks will automatically adapt to the corresponding address family._
+> _**Note**: The script supports dual-stack environments for gateway monitoring. Gateway addresses, **PING_HOST**, and **SPEEDTEST_HOST** can be defined using either IPv4 or IPv6, and health checks will automatically adapt to the corresponding address family._
+>
+> _However, **VIRTUAL_IPADDRESS** currently supports **IPv4 only** for node synchronization. Support for IPv6 synchronization is planned for future updates._
 
 ## Integration with Keepalived
 
