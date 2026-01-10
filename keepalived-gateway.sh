@@ -160,6 +160,12 @@ set_mode ()
     LOG_PREFIX="kg [$1]"
 }
 
+check_permissions ()
+{
+    is_equal "$(id -u)" 0 ||
+        die "error: must be run as root to manage routes and interfaces."
+}
+
 check_dependencies ()
 {
     RETURN=0
@@ -1492,16 +1498,18 @@ EOF
 
 main ()
 {
+    say "switching to init mode"
+    set_mode "init"
+    check_permissions
+    say "loading configuration..."
+    check_dependencies
+
     CR="$(printf "\r")"
     LF="
 "
     POSIX_IFS="$(printf " \t")$LF"
     IFS="$POSIX_IFS"
 
-    say "switching to init mode"
-    set_mode "init"
-    say "loading configuration..."
-    check_dependencies
     include_config
     set_variables
     remove_test_route || die
