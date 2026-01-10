@@ -1359,7 +1359,7 @@ share_gateways ()
 
 stop_share_gateways ()
 {
-    if is_process_alive "$GATEWAY_SERVER_PID"
+    if is_process_alive "${GATEWAY_SERVER_PID:-}"
     then
         kill "$GATEWAY_SERVER_PID" 2>/dev/null || :
         GATEWAY_SERVER_PID=""
@@ -1480,6 +1480,7 @@ main ()
                 update_gateways_state
             } && share_gateways || stop_share_gateways
         else
+            is_diff "$LOG_PREFIX" "kg [master]" || stop_share_gateways
             LOG_PREFIX="kg [slave]"
             fetch_gateways && sync_gateways || :
         fi
