@@ -154,6 +154,12 @@ is_port_free ()
     '
 }
 
+set_mode ()
+{
+    MODE="$1"
+    LOG_PREFIX="kg [$1]"
+}
+
 check_dependencies ()
 {
     RETURN=0
@@ -1149,6 +1155,7 @@ check_gateways ()
     ALIVE_GATEWAYS=""
     ALIVE_METRICS=""
     ALIVE_ROUTES=""
+    DEAD_ROUTES=""
 
     for GATEWAY in $DEFAULT_GATEWAYS
     do
@@ -1158,6 +1165,7 @@ check_gateways ()
 
         is_interface "$INTERFACE" || {
             say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
+            DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
             continue
         }
 
@@ -1167,12 +1175,14 @@ check_gateways ()
             check_ping -I "$INTERFACE" "$PING_IP" || {
                 ip_route del "$PING_ROUTE"
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
+                DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
                 continue
             }
             ip_route del "$PING_ROUTE"
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
+                DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
                 continue
             }
         fi
@@ -1183,7 +1193,14 @@ check_gateways ()
         ALIVE_METRICS="${ALIVE_METRICS:+"$ALIVE_METRICS "}${METRIC:-0}"
         ALIVE_ROUTES="${ALIVE_ROUTES:+"$ALIVE_ROUTES$LF"}$ROUTE"
     done
-    is_equal "$ALIVE_COUNT" "$TOTAL_METRICS"
+
+    is_equal "$ALIVE_COUNT" "$TOTAL_METRICS" || {
+        is_empty "${DEAD_ROUTES:-}" || {
+            say "dead routes detected:"
+            echo "$DEAD_ROUTES"
+        }
+        return 1
+    }
 }
 
 refresh_routing_table ()
@@ -1219,7 +1236,7 @@ reconcile_gateways ()
                     BEST_SPEED=0
                 }
                 is_empty "${ALIVE_METRICS:-}" || is_failed_metric || {
-                    say "skipping gateway: active route already found with metric '$CURRENT_METRIC'"
+                    say "skipping gateway: active route already found with metric '${METRIC:-0}'"
                     continue
                 }
                 CURRENT_METRIC="${METRIC:-0}"
@@ -1245,11 +1262,19 @@ reconcile_gateways ()
         is_empty "${BEST_ROUTE:-}" || {
             collect_gateway
             collect_route
+            break
         }
 
         is_empty "${DEFAULT_GATEWAYS:-}" || break
 
-        say "WARNING: no alive gateways available, retrying in 1s..."
+        echo
+        say "WARNING: no alive gateways found, retrying in 1s..."
+
+        # In 'slave' mode, if 'master's web is unreachable and 'slave-single' is active:
+        # Instead of waiting indefinitely for a live route,
+        # proceed to check master availability.
+        is_diff "$MODE" "slave-single" || return
+
         sleep 1
     done
 
@@ -1260,7 +1285,7 @@ sync_gateways ()
 {
     is_diff "${FETCHED_GATEWAYS:-}" "${DEFAULT_GATEWAYS:-}" || {
         say "local routing state is already up to date"
-        return 0
+        return
     }
     say "applying new gateway configuration from master (${VIRTUAL_IPADDRESS%/*})"
 
@@ -1448,45 +1473,86 @@ main ()
     POSIX_IFS="$(printf " \t")$LF"
     IFS="$POSIX_IFS"
 
-    LOG_PREFIX="kg [init]"
-
+    say "switching to init mode"
+    set_mode "init"
+    say "loading configuration..."
     check_dependencies
     include_config
     set_variables
     remove_test_route || die
+    say "initialization complete, system ready"
 
     trap 'clean_and_exit' 0      # EXIT (0) : Naturally occurring script termination.
     trap 'clean_and_exit 129' 1  # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
     trap 'clean_and_exit 130' 2  # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
     trap 'clean_and_exit 143' 15 # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
 
-    LOG_PREFIX="kg [single]"
-
     ALIVE_GATEWAYS=""
     ALIVE_METRICS=""
     ALIVE_ROUTES=""
     GATEWAY_SERVER_PID=""
 
-    while :
-    do
-        if is_empty "${VIRTUAL_IPADDRESS:-}"
-        then
+    if is_empty "${VIRTUAL_IPADDRESS:-}"
+    then
+        echo
+        say "switching to single mode"
+        set_mode "single"
+        while :
+        do
             check_gateways || reconcile_gateways
-        elif is_vrrp_master
-        then
-            LOG_PREFIX="kg [master]"
-            check_gateways || {
-                reconcile_gateways
-                update_gateways_state
-            } && share_gateways || stop_share_gateways
-        else
-            is_diff "$LOG_PREFIX" "kg [master]" || stop_share_gateways
-            LOG_PREFIX="kg [slave]"
-            fetch_gateways && sync_gateways || :
-        fi
-        say "next check cycle in: '$HUMAN_INTERVAL'"
-        sleep "$CHECK_INTERVAL"
-    done
+            say "next check cycle in: '$HUMAN_INTERVAL'"
+            sleep "$CHECK_INTERVAL"
+        done
+    else
+        while :
+        do
+            if is_vrrp_master
+            then
+                is_equal "$MODE" "master" || {
+                    echo
+                    say "virtual IP detected on this host: '$VIRTUAL_IPADDRESS'"
+                    say "switching to master mode"
+                    set_mode "master"
+                }
+                check_gateways || {
+                    reconcile_gateways
+                    update_gateways_state
+                } && share_gateways || stop_share_gateways
+            else
+                case "$MODE" in
+                    "slave-single")
+                        fetch_gateways && {
+                            echo
+                            say "master reachable, switching back to slave mode"
+                            set_mode "slave"
+                            sync_gateways
+                        }
+                    ;;
+                    "init" | "master" | "slave")
+                        is_diff "$MODE" "master" || stop_share_gateways
+                        is_equal "$MODE" "slave" || {
+                            echo
+                            say "virtual IP not found on this host: '$VIRTUAL_IPADDRESS'"
+                            say "switching to slave mode"
+                            set_mode "slave"
+                        }
+                        fetch_gateways && sync_gateways || {
+                            say "master unreachable, switching to slave-single mode"
+                            set_mode "slave-single"
+                            false
+                        }
+                    ;;
+                esac || {
+                    check_gateways || reconcile_gateways || {
+                        sleep 1
+                        continue
+                    }
+                }
+            fi
+            say "next check cycle in: '$HUMAN_INTERVAL'"
+            sleep "$CHECK_INTERVAL"
+        done
+    fi
 }
 
 main
