@@ -8,9 +8,13 @@
 
 `remove_test_route`
 
-- [ ] 1. Сначала найти все маршруты для ${PING_IPV4:-} ${SPEEDTEST_IPV4:-} ${PING_IPV6:-} ${SPEEDTEST_IPV6:-};
+- [X] 1. Сначала найти все маршруты для ${PING_IPV4:-} ${SPEEDTEST_IPV4:-} ${PING_IPV6:-} ${SPEEDTEST_IPV6:-};
 
-- [ ] 2. Последовательно удалять и если не удалятся, выйти `return $RETURN`;
+- [X] 2. Последовательно удалять и если не удалятся, выйти `return $RETURN`;
+
+`refresh_routing_table`
+
+- [ ] Должен обновлять как IPv4, так и IPv6 маршруты
 
 `update_gateways_state`
 

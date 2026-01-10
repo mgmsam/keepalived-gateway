@@ -250,7 +250,17 @@ resolve_ips ()
 
 parse_resource ()
 {
-    SCHEME="" USER_INFO="" USER="" PASS="" AUTHORITY="" MASK="" PORT="" RESOURCE="" IPV4="" IPV6=""
+    SCHEME=""
+    USER_INFO=""
+    USER=""
+    PASS=""
+    AUTHORITY=""
+    MASK=""
+    PORT=""
+    RESOURCE=""
+    IPV4=""
+    IPV6=""
+
     HOST="$1"
     HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
     HOST="${HOST%"${HOST##*[![:blank:]]}"}"
@@ -872,31 +882,49 @@ set_variables ()
     esac || die 2 "error: variable 'GATEWAYS': no valid gateways found: '${GATEWAYS:-}'"
 }
 
-ip_route ()
+run_ip ()
 {
-    EXEC="$IP_ROUTE route $@"
-    $EXEC && echo "$EXEC"
+    EXEC="$IP_CMD $@"
+    $EXEC && echo "$EXEC" >&2
+}
+
+remove_route ()
+{
+    while read ROUTE
+    do
+        run_ip route del "$ROUTE" || RETURN=$?
+    done <<EOF
+$REMOVE_ROUTES
+EOF
 }
 
 remove_test_route ()
 {
+    IP_CMD="ip -4" REMOVE_ROUTES=""
     for IP in ${PING_IPV4:-} ${SPEEDTEST_IPV4:-}
     do
-        IP_ROUTE="ip -4"
-        while ip_route del "$IP"
-        do
-            :
-        done 2>/dev/null
+        ROUTE="$(run_ip route show "$IP" 2>/dev/null)"
+        is_empty "${ROUTE:-}" ||
+            REMOVE_ROUTES="${REMOVE_ROUTES:+"$REMOVE_ROUTES$LF"}$ROUTE"
     done
+    is_empty "${REMOVE_ROUTES:-}" || {
+        say "removing test IPv4 routes from the system..."
+        remove_route
+        REMOVE_ROUTES=""
+    }
 
+    IP_CMD="ip -6"
     for IP in ${PING_IPV6:-} ${SPEEDTEST_IPV6:-}
     do
-        IP_ROUTE="ip -6"
-        while ip_route del "$IP"
-        do
-            :
-        done 2>/dev/null
+        ROUTE="$(run_ip route show "$IP" 2>/dev/null)"
+        is_empty "${ROUTE:-}" ||
+            REMOVE_ROUTES="${REMOVE_ROUTES:+"$REMOVE_ROUTES$LF"}$ROUTE"
     done
+    is_empty "${REMOVE_ROUTES:-}" || {
+        say "removing test IPv6 routes from the system..."
+        remove_route
+        REMOVE_ROUTES=""
+    }
 
     return "${RETURN:-0}"
 }
@@ -904,6 +932,7 @@ remove_test_route ()
 clean_and_exit ()
 {
     EXIT="${1:-$?}"
+    echo
     trap - 0
     remove_test_route || RETURN=$?
     is_empty "${GATEWAY_SERVER_PID:-}" || kill $GATEWAY_SERVER_PID 2>/dev/null
@@ -920,7 +949,7 @@ EOF
 
     case "$GATEWAY_IP" in
         *:*)
-            IP_ROUTE="ip -6"
+            IP_CMD="ip -6"
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV6:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
             PING_IP="${PING_IPV6:-}"
@@ -928,7 +957,7 @@ EOF
             DOWNLOAD_INET="-6"
         ;;
         *)
-            IP_ROUTE="ip -4"
+            IP_CMD="ip -4"
             SPEEDTEST_URL="${SPEEDTEST_URL_IPV4:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
             PING_IP="${PING_IPV4:-}"
@@ -1018,7 +1047,7 @@ evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
 
-    ip_route replace "$SPEEDTEST_ROUTE"
+    run_ip route replace "$SPEEDTEST_ROUTE"
     if speedtest "$SPEEDTEST_URL"
     then
         test "$BEST_SPEED" -ge "$BIT" || {
@@ -1026,10 +1055,10 @@ evaluate_speed ()
             BEST_ROUTE="$ROUTE"
             BEST_SPEED="$BIT"
         }
-        ip_route del "$SPEEDTEST_ROUTE"
+        run_ip route del "$SPEEDTEST_ROUTE"
         say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
     else
-        ip_route del "$SPEEDTEST_ROUTE"
+        run_ip route del "$SPEEDTEST_ROUTE"
         say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
         return 1
     fi
@@ -1039,14 +1068,14 @@ evaluate_host ()
 {
     say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
 
-    ip_route replace "$PING_ROUTE"
+    run_ip route replace "$PING_ROUTE"
     check_ping -I "$INTERFACE" "$PING_IP" && {
-        ip_route del "$PING_ROUTE"
+        run_ip route del "$PING_ROUTE"
         say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
     } || {
-        ip_route del "$PING_ROUTE"
+        run_ip route del "$PING_ROUTE"
         say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
             say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
@@ -1072,7 +1101,7 @@ add_route ()
     say "applying optimized routes to the system..."
     while read ROUTE
     do
-        ip_route replace "$ROUTE" || :
+        run_ip route replace "$ROUTE" || :
     done <<EOF
 $DEFAULT_ROUTES
 EOF
@@ -1099,7 +1128,7 @@ get_current_routes ()
             }
         ')"
         then
-            while read -r ROUTE
+            while read ROUTE
             do
                 ROUTE=$(echo $ROUTE)
                 CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
@@ -1108,11 +1137,11 @@ $ROUTES
 EOF
         fi
     done 2>/dev/null
+    is_not_empty "${CURRENT_ROUTES:-}" || return
 }
 
 get_obsolete_routes ()
 {
-    is_not_empty "${CURRENT_ROUTES:-}" || return
     REMOVE_ROUTES="$(printf "%s\n\n%s" "$DEFAULT_ROUTES" "$CURRENT_ROUTES" | awk '
         BEGIN {
             found_separator = "no"
@@ -1132,19 +1161,15 @@ get_obsolete_routes ()
             print $0
         }
     ')"
+    is_not_empty "${REMOVE_ROUTES:-}" || return
 }
 
 remove_obsolete_routes ()
 {
-    is_not_empty "${REMOVE_ROUTES:-}" || return
     echo
     say "removing obsolete routes from the system..."
-    while read ROUTE
-    do
-        ip_route del "$ROUTE"
-    done <<EOF
-$REMOVE_ROUTES
-EOF
+    remove_route
+    return "${RETURN:-0}"
 }
 
 check_gateways ()
@@ -1171,14 +1196,14 @@ check_gateways ()
 
         if is_not_empty "${PING_HOST:-}"
         then
-            ip_route replace "$PING_ROUTE"
+            run_ip route replace "$PING_ROUTE"
             check_ping -I "$INTERFACE" "$PING_IP" || {
-                ip_route del "$PING_ROUTE"
+                run_ip route del "$PING_ROUTE"
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
                 DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
                 continue
             }
-            ip_route del "$PING_ROUTE"
+            run_ip route del "$PING_ROUTE"
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
