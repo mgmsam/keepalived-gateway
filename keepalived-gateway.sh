@@ -154,9 +154,9 @@ is_port_free ()
     '
 }
 
-set_mode ()
+set_state ()
 {
-    MODE="$1"
+    STATE="$1"
     LOG_PREFIX="kg [$1]"
 }
 
@@ -1304,7 +1304,7 @@ reconcile_gateways ()
         # In 'slave' mode, if 'master's web is unreachable and 'slave-single' is active:
         # Instead of waiting indefinitely for a live route,
         # proceed to check master availability.
-        is_diff "$MODE" "slave-single" || return
+        is_diff "$STATE" "slave-single" || return
 
         sleep 1
     done
@@ -1499,7 +1499,7 @@ EOF
 main ()
 {
     say "switching to init mode"
-    set_mode "init"
+    set_state "init"
     check_permissions
     say "loading configuration..."
     check_dependencies
@@ -1529,7 +1529,7 @@ main ()
     then
         echo
         say "switching to single mode"
-        set_mode "single"
+        set_state "single"
         while :
         do
             check_gateways || reconcile_gateways
@@ -1541,37 +1541,37 @@ main ()
         do
             if is_vrrp_master
             then
-                is_equal "$MODE" "master" || {
+                is_equal "$STATE" "master" || {
                     echo
                     say "virtual IP detected on this host: '$VIRTUAL_IPADDRESS'"
                     say "switching to master mode"
-                    set_mode "master"
+                    set_state "master"
                 }
                 check_gateways || {
                     reconcile_gateways
                     update_gateways_state
                 } && share_gateways || stop_share_gateways
             else
-                case "$MODE" in
+                case "$STATE" in
                     "slave-single")
                         fetch_gateways && {
                             echo
                             say "master reachable, switching back to slave mode"
-                            set_mode "slave"
+                            set_state "slave"
                             sync_gateways
                         }
                     ;;
                     "init" | "master" | "slave")
-                        is_diff "$MODE" "master" || stop_share_gateways
-                        is_equal "$MODE" "slave" || {
+                        is_diff "$STATE" "master" || stop_share_gateways
+                        is_equal "$STATE" "slave" || {
                             echo
                             say "virtual IP not found on this host: '$VIRTUAL_IPADDRESS'"
                             say "switching to slave mode"
-                            set_mode "slave"
+                            set_state "slave"
                         }
                         fetch_gateways && sync_gateways || {
                             say "master unreachable, switching to slave-single mode"
-                            set_mode "slave-single"
+                            set_state "slave-single"
                             false
                         }
                     ;;
