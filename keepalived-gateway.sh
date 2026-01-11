@@ -759,19 +759,19 @@ set_variables ()
             is_valid_ip "${IPV4:-"$IPV6"}" && {
                 VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
                 VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
-                is_not_empty "${GATEWAYS_SYNC_PORT:-}" ||
-                    die 2 "error: variable 'GATEWAYS_SYNC_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
-                is_digit "$GATEWAYS_SYNC_PORT" ||
-                    die 2 "error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
-                is_port_free "$GATEWAYS_SYNC_PORT" ||
-                    die 2 "error: cannot start sync server/client, port $GATEWAYS_SYNC_PORT is busy"
+                is_not_empty "${VIRTUAL_PORT:-}" ||
+                    die 2 "error: variable 'VIRTUAL_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
+                is_digit "$VIRTUAL_PORT" ||
+                    die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+                is_port_free "$VIRTUAL_PORT" ||
+                    die 2 "error: cannot start sync server/client, port $VIRTUAL_PORT is busy"
             }
         } || die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
         detect_sync_transport
         GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
     else
-        is_empty "${GATEWAYS_SYNC_PORT:-}" || is_digit "$GATEWAYS_SYNC_PORT" ||
-            die 2 "error: variable 'GATEWAYS_SYNC_PORT': invalid port number: '$GATEWAYS_SYNC_PORT'"
+        is_empty "${VIRTUAL_PORT:-}" || is_digit "$VIRTUAL_PORT" ||
+            die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
     fi
 
     parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}"
@@ -1368,7 +1368,7 @@ serve_gateways_nc ()
 
     while :
     do
-        $NETCAT "$GATEWAYS_SYNC_PORT" <<EOF >/dev/null 2>&1 &
+        $NETCAT "$VIRTUAL_PORT" <<EOF >/dev/null 2>&1 &
 HTTP/1.1 200 OK$CR
 Content-Type: text/plain$CR
 Content-Length: ${#DEFAULT_GATEWAYS}$CR
@@ -1383,19 +1383,19 @@ EOF
 
 serve_gateways_uhttpd ()
 {
-    uhttpd -p "$GATEWAYS_SYNC_PORT" -h "${GATEWAYS_STATE_FILE%/*}" -Rf
+    uhttpd -p "$VIRTUAL_PORT" -h "${GATEWAYS_STATE_FILE%/*}" -Rf
 }
 
 serve_gateways_telnetd ()
 {
-    telnetd -p "$GATEWAYS_SYNC_PORT" -f "$GATEWAYS_STATE_FILE" -l : -KF
+    telnetd -p "$VIRTUAL_PORT" -f "$GATEWAYS_STATE_FILE" -l : -KF
 }
 
 share_gateways ()
 {
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
-        is_port_free "$GATEWAYS_SYNC_PORT" || {
-            say "error: cannot start sync server, port $GATEWAYS_SYNC_PORT is busy"
+        is_port_free "$VIRTUAL_PORT" || {
+            say "error: cannot start sync server, port $VIRTUAL_PORT is busy"
             return
         } >&2
 
@@ -1405,7 +1405,7 @@ share_gateways ()
 
         if is_process_alive "$GATEWAY_SERVER_PID"
         then
-            say "gateway server successfully started on port $GATEWAYS_SYNC_PORT"
+            say "gateway server successfully started on port $VIRTUAL_PORT"
         else
             GATEWAY_SERVER_PID=""
             say "error: gateway server failed to start (check system logs)"
@@ -1426,21 +1426,21 @@ stop_share_gateways ()
 fetch_gateways_wget ()
 {
     FETCHED_GATEWAYS="$(
-        2>&1 wget -O - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
+        2>&1 wget -O - "http://${VIRTUAL_IPADDRESS%/*}:$VIRTUAL_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
 fetch_gateways_curl ()
 {
     FETCHED_GATEWAYS="$(
-        2>&1 curl -o - "http://${VIRTUAL_IPADDRESS%/*}:$GATEWAYS_SYNC_PORT/${GATEWAYS_STATE_FILE##*/}"
+        2>&1 curl -o - "http://${VIRTUAL_IPADDRESS%/*}:$VIRTUAL_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
 fetch_gateways_nc ()
 {
     FETCHED_GATEWAYS="$(
-        2>&1 $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$GATEWAYS_SYNC_PORT" <<EOF
+        2>&1 $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$VIRTUAL_PORT" <<EOF
 GET /${GATEWAYS_STATE_FILE##*/} HTTP/1.0$CR
 Host: ${VIRTUAL_IPADDRESS%/*}$CR
 Connection: close$CR
