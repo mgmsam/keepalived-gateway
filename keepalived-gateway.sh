@@ -525,6 +525,28 @@ collect_interface ()
     esac
 }
 
+collect_metrics_ipv4 ()
+{
+    case " ${METRICS_IPV4:-} " in
+        *" ${METRIC:-0} "*)
+        ;;
+        *)
+            METRICS_IPV4="${METRICS_IPV4:+"$METRICS_IPV4 "}${METRIC:-0}"
+        ;;
+    esac
+}
+
+collect_metrics_ipv6 ()
+{
+    case " ${METRICS_IPV6:-} " in
+        *" ${METRIC:-0} "*)
+        ;;
+        *)
+            METRICS_IPV6="${METRICS_IPV6:+"$METRICS_IPV6 "}${METRIC:-0}"
+        ;;
+    esac
+}
+
 optimize_gateways ()
 {
     awk '
@@ -566,30 +588,23 @@ optimize_gateways ()
             if (gateways != "") print gateways
         }
     ' <<EOF
-$GATEWAYS
+$1
 EOF
 }
 
 count_metrics ()
 {
-    awk '
-        {
-            for (i=1; i<=NF; i++) {
-                fields = split($i, gateway, "=")
-                metric = (fields >= 3 && gateway[3] != "") ? gateway[3] : 0
-                if (gateway[1] != "" && !seen[metric]++) count++
-            }
-        }
-        END { print count + 0 }
-    ' <<EOF
-$GATEWAYS
-EOF
+    set -- $1
+    puts $#
 }
 
 parse_gateway ()
 {
     IFACES=""
-    GATEWAYS=""
+    GATEWAYS_IPV4=""
+    GATEWAYS_IPV6=""
+    METRICS_IPV4=""
+    METRICS_IPV6=""
     RETURN=0
     for GATEWAY
     do
@@ -609,11 +624,35 @@ parse_gateway ()
         case "$FAMILY" in
             inet)
                 PROTO="IPv4"
-                is_not_empty "${PING4:-}"
+                is_not_empty "${PING4:-}" && {
+
+                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
+                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+
+                    is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
+                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+
+                    collect_metrics_ipv4
+                    GATEWAYS_IPV4="${GATEWAYS_IPV4:+"$GATEWAYS_IPV4$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
+                }
             ;;
             inet6)
                 PROTO="IPv6"
-                is_not_empty "${PING6:-}"
+                is_not_empty "${PING6:-}" && {
+
+                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
+                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+
+                    is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
+                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+
+                    collect_metrics_ipv6
+                    GATEWAYS_IPV6="${GATEWAYS_IPV6:+"$GATEWAYS_IPV6$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
+                }
             ;;
         esac || {
             say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
@@ -621,44 +660,13 @@ parse_gateway ()
             continue
         }
 
-        is_empty "${PING_HOST:-}" || {
-            case "$FAMILY" in
-                inet)
-                    PROTO="IPv4"
-                    is_not_empty "${PING_IPV4:-}"
-                ;;
-                inet6)
-                    PROTO="IPv6"
-                    is_not_empty "${PING_IPV6:-}"
-                ;;
-            esac || {
-                say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
-                say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
-            }
-        }
-
-        is_empty "${SPEEDTEST_HOST:-}" || {
-            case "$FAMILY" in
-                inet)
-                    PROTO="IPv4"
-                    is_not_empty "${SPEEDTEST_IPV4:-}"
-                ;;
-                inet6)
-                    PROTO="IPv6"
-                    is_not_empty "${SPEEDTEST_IPV6:-}"
-                ;;
-            esac || {
-                say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
-                say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
-            }
-        }
-
-        GATEWAYS="${GATEWAYS:+"$GATEWAYS$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
         collect_interface
     done >&2
     is_equal "$RETURN" 0 || die "$RETURN"
-    GATEWAYS="$(optimize_gateways)"
-    TOTAL_METRICS="$(count_metrics)"
+    GATEWAYS_IPV4="$(optimize_gateways "${GATEWAYS_IPV4:-}")"
+    GATEWAYS_IPV6="$(optimize_gateways "${GATEWAYS_IPV6:-}")"
+    TOTAL_METRICS_IPV4="$(count_metrics "${METRICS_IPV4:-}")"
+    TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
 }
 
 set_variables ()
