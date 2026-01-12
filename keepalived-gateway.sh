@@ -682,21 +682,17 @@ set_variables ()
         parse_resource "$PING_HOST" ||
             die 2 "error: failed to resolve PING_HOST IP: '$PING_HOST'"
 
-        is_empty "${IPV4:-}" || {
-            is_valid_ip "$IPV4" ||
-                die 2 "error: variable 'PING_HOST': resolved to invalid IPv4 address: '$IPV4'"
+        is_empty "${IPV4:-}" || is_valid_ip "$IPV4" ||
+            die 2 "error: variable 'PING_HOST': resolved to invalid IPv4 address: '$IPV4'"
 
-            is_not_empty "${PING4:-}" ||
-                die 2 "error: variable 'PING_HOST': resolved to IPv4, but IPv4 ping tool is missing"
-        }
+        is_empty "${IPV6:-}" || is_valid_ip "$IPV6" ||
+            die 2 "error: variable 'PING_HOST': resolved to invalid IPv6 address: '$IPV6'"
 
-        is_empty "${IPV6:-}" || {
-            is_valid_ip "$IPV6" ||
-                die 2 "error: variable 'PING_HOST': resolved to invalid IPv6 address: '$IPV6'"
+        # is_not_empty "${PING4:-}" ||
+        #     die 2 "error: variable 'PING_HOST': resolved to IPv4, but IPv4 ping tool is missing"
 
-            is_not_empty "${PING6:-}" ||
-                die 2 "error: variable 'PING_HOST': resolved to IPv6, but IPv6 ping tool is missing"
-        }
+        # is_not_empty "${PING6:-}" ||
+        #     die 2 "error: variable 'PING_HOST': resolved to IPv6, but IPv6 ping tool is missing"
 
         PING_HOST="$HOST"
         PING_IPV4="${IPV4:-}"
@@ -715,7 +711,8 @@ set_variables ()
         ;;
     esac
 
-    is_equal "$SPEEDTEST" "no" || {
+    if is_equal "$SPEEDTEST" "yes"
+    then
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
 
             case "${SPEEDTEST_SCOPE:-}" in
@@ -758,7 +755,7 @@ set_variables ()
             SPEEDTEST_IPV4="${IPV4:-}"
             SPEEDTEST_IPV6="${IPV6:-}"
         }
-    }
+    fi
 
     case "${ROLE:=single}" in
         master | master-advisor | single | slave)
