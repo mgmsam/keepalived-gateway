@@ -632,9 +632,8 @@ parse_gateway ()
                     is_not_empty "${PING_IPV6:-}"
                 ;;
             esac || {
-                say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
-                RETURN=2
-                continue
+                say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
+                say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
             }
         }
 
@@ -649,9 +648,8 @@ parse_gateway ()
                     is_not_empty "${SPEEDTEST_IPV6:-}"
                 ;;
             esac || {
-                say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
-                RETURN=2
-                continue
+                say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
+                say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
             }
         }
 
