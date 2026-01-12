@@ -768,7 +768,7 @@ set_variables ()
     }
 
     case "${ROLE:=single}" in
-        master | master-advisor | single | slave)
+        cluster | master | master-advisor | single | slave)
         ;;
         *)
             die 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
@@ -781,7 +781,7 @@ set_variables ()
             die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
 
         is_equal "$ROLE" "single" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'master|master-advisor|slave'"
+            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
     else
         parse_resource "$VIRTUAL_IPADDRESS" ||
             die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
