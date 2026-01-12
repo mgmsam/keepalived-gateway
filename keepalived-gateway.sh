@@ -135,41 +135,16 @@ die ()
     exit "$SAY_RETURN"
 }
 
-is_interface ()
-{
-    ip link show ${1:-} >/dev/null 2>&1
-}
-
-is_port_free ()
-{
-    cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '
-        $2 ~ /:'"$(printf "%04X" "$1")"'$/ {
-            found = "yes"
-            exit
-        }
-        END {
-            if (found == "yes") exit 1
-            exit 0
-        }
-    '
-}
-
 set_state ()
 {
     STATE="$1"
     LOG_PREFIX="kg [$1]"
 }
 
-check_permissions ()
-{
-    is_equal "$(id -u)" 0 ||
-        die "error: must be run as root to manage routes and interfaces."
-}
-
-check_dependencies ()
+check_base_dependencies ()
 {
     RETURN=0
-    for COMMAND in awk date ip ping printf sleep timeout wc
+    for COMMAND in awk id ping printf sleep timeout
     do
         type "$COMMAND" >/dev/null 2>&1 || {
             say "dependency not found: '$COMMAND'" >&2
@@ -203,6 +178,23 @@ check_dependencies ()
     fi >/dev/null 2>&1
 }
 
+check_permissions ()
+{
+    is_equal "$(id -u)" 0 ||
+        die "error: must be run as root to manage routes and interfaces."
+}
+
+setup_core_env ()
+{
+    LF="
+"
+    CR="$(printf "\r")"
+    TAB="$(printf "\t")"
+    SPACE=" "
+    POSIX_IFS="$SPACE$TAB$LF"
+    IFS="$POSIX_IFS"
+}
+
 include_config ()
 {
     CONFIG_FILE="/etc/keepalived-gateway.conf"
@@ -210,48 +202,88 @@ include_config ()
           . "$CONFIG_FILE" || die
 }
 
+parse_interval ()
+{
+    case "${2%[smhdwMy]}" in
+        "" | *[!0123456789]*)
+            return 1
+        ;;
+    esac
+    case "$2" in
+        *m) INTERVAL=$((${2%m} * 60)) ;;
+        *h) INTERVAL=$((${2%h} * 3600)) ;;
+        *d) INTERVAL=$((${2%d} * 86400)) ;;
+        *w) INTERVAL=$((${2%w} * 604800)) ;;
+        *M) INTERVAL=$((${2%M} * 2678400)) ;;
+        *y) INTERVAL=$((${2%y} * 32140800)) ;;
+         *) INTERVAL="${2%s}" ;;
+    esac
+}
+
+format_duration ()
+{
+    S=${1:-0}
+
+    D=$((S / 86400))
+    S=$((S % 86400))
+    H=$((S / 3600))
+    S=$((S % 3600))
+    M=$((S / 60))
+    S=$((S % 60))
+
+    RESULT=""
+    test "$D" -gt 0 && RESULT="${D}d" || :
+    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
+    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
+    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
+
+    puts "$RESULT"
+}
+
 resolve_ips ()
 {
-
-    IPV4=$(awk '
-        /^[ \t]*[^#]/ {
-            for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                if ($1 ~ /\./) {
-                    print $1
-                    exit
-                }
-            }
+    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
+        /PING/ {
+            split($0, a, /[()]/)
+            print a[2]
+            exit
         }
-    ' /etc/hosts)
+    ')" || :
 
-    IPV6=$(awk '
-        /^[ \t]*[^#]/ {
-            for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                if ($1 ~ /:/) {
-                    print $1
-                    exit
-                }
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
+            /PING/ {
+                split($0, a, /[()]/)
+                print a[2]
+                exit
             }
-        }
-    ' /etc/hosts)
+        ')" || :
+
+    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
 
     is_not_empty "${IPV4:-}" ||
-        IPV4="$($TIMEOUT 2 $PING4 -c 1 "$1" 2>/dev/null | awk '
-            /PING/ {
-                split($0, a, /[()]/)
-                print a[2]
-                exit
+        IPV4=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /\./) {
+                        print $1
+                        exit
+                    }
+                }
             }
-        ')"
+        ' /etc/hosts)
 
-    is_not_empty "${IPV6:-}" || is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 2 $PING6 -c 1 "$1" 2>/dev/null | awk '
-            /PING/ {
-                split($0, a, /[()]/)
-                print a[2]
-                exit
+    is_not_empty "${IPV6:-}" ||
+        IPV6=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /:/) {
+                        print $1
+                        exit
+                    }
+                }
             }
-        ')"
+        ' /etc/hosts)
 }
 
 parse_resource ()
@@ -341,12 +373,13 @@ parse_resource ()
             IPV6="$HOST"
         ;;
         *[a-zA-Z]*)
-            resolve_ips "$HOST" || :
+            resolve_ips "$HOST"
         ;;
         *)
             IPV4="$HOST"
         ;;
     esac
+    is_not_empty "${IPV4:-"${IPV6:-}"}"
 }
 
 is_valid_ip ()
@@ -383,116 +416,9 @@ is_valid_ip ()
     esac
 }
 
-is_netcat_server_capable ()
-{
-    case "${NETCAT_STAT:-}" in
-        *not_a_port*)
-            case "$NETCAT_STAT" in
-                *[uU]sage*)
-                ;;
-                *)
-                    return
-                ;;
-            esac
-        ;;
-    esac
-    return 1
-}
-
-detect_netcat_server ()
-{
-    NETCAT=""
-    NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
-    if is_netcat_server_capable
-    then
-        NETCAT="nc -l -p"
-        return
-    fi
-
-    NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
-    if is_netcat_server_capable
-    then
-        NETCAT="nc -l"
-        return
-    fi
-
-    return 1
-}
-
-detect_sync_transport ()
-{
-    RETURN=0
-
-    GATEWAYS_SERVER_DISPATCHER=""
-    GATEWAYS_CLIENT_DISPATCHER=""
-
-    for COMMAND in uhttpd telnetd nc
-    do
-        if type "$COMMAND" >/dev/null 2>&1
-        then
-            is_diff "$COMMAND" "nc" || detect_netcat_server || break
-            GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
-            break
-        fi
-    done
-
-    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
-        die "error: no supported sync server found (uhttpd/telnetd/nc required)"
-
-    for COMMAND in wget curl nc
-    do
-        if type "$COMMAND" >/dev/null 2>&1
-        then
-            GATEWAYS_CLIENT_DISPATCHER="fetch_gateways_$COMMAND"
-            break
-        fi
-    done
-
-    is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" ||
-        die "error: no supported sync client found (wget/curl/nc required)"
-}
-
-parse_interval ()
-{
-    case "${2%[smhdwMy]}" in
-        "" | *[!0123456789]*)
-            die 2 "error: variable '$1': must be an integer [s|m|h|d|w|M|y], but got: '${2:-}'"
-        ;;
-    esac
-    case "$2" in
-        *m) INTERVAL=$((${2%m} * 60)) ;;
-        *h) INTERVAL=$((${2%h} * 3600)) ;;
-        *d) INTERVAL=$((${2%d} * 86400)) ;;
-        *w) INTERVAL=$((${2%w} * 604800)) ;;
-        *M) INTERVAL=$((${2%M} * 2678400)) ;;
-        *y) INTERVAL=$((${2%y} * 32140800)) ;;
-         *) INTERVAL="${2%s}" ;;
-    esac
-}
-
-format_duration ()
-{
-    S=${1:-0}
-
-    D=$((S / 86400))
-    S=$((S % 86400))
-    H=$((S / 3600))
-    S=$((S % 3600))
-    M=$((S / 60))
-    S=$((S % 60))
-
-    RESULT=""
-    test "$D" -gt 0 && RESULT="${D}d" || :
-    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
-    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
-    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
-
-    echo "$RESULT"
-}
-
 parse_gateway_entry ()
 {
-    IFS="@#_=-"
+    IFS="@#="
     set -- $GATEWAY
     IFS="$POSIX_IFS"
 
@@ -739,44 +665,43 @@ parse_gateway ()
 
 set_variables ()
 {
-    is_interface ${INTERFACE:-} ||
-        say "WARNING: variable 'INTERFACE': network interface not found: '$INTERFACE'"
     DEFAULT_INTERFACE="${INTERFACE:-}"
 
-    case "${METRIC:=0}" in
-        *[!0123456789]*)
-            die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
-        ;;
-        0*)
-            METRIC="${METRIC#"${METRIC%%[!0]*}"}"
-        ;;
-    esac
+    is_digit "${METRIC:=0}" ||
+        die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
+    METRIC="${METRIC#"${METRIC%%[!0]*}"}"
     DEFAULT_METRIC="${METRIC:-}"
 
-    if is_not_empty "${VIRTUAL_IPADDRESS:-}"
-    then
-        parse_resource "$VIRTUAL_IPADDRESS" && {
-            is_valid_ip "${IPV4:-"$IPV6"}" && {
-                VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
-                VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
-                is_not_empty "${VIRTUAL_PORT:-}" ||
-                    die 2 "error: variable 'VIRTUAL_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
-                is_digit "$VIRTUAL_PORT" ||
-                    die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
-                is_port_free "$VIRTUAL_PORT" ||
-                    die 2 "error: cannot start sync server/client, port $VIRTUAL_PORT is busy"
-            }
-        } || die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid vrrp address: '$VIRTUAL_IPADDRESS'"
-        detect_sync_transport
-        GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
-    else
-        is_empty "${VIRTUAL_PORT:-}" || is_digit "$VIRTUAL_PORT" ||
-            die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
-    fi
-
-    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-10}"
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-60}" ||
+        die 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
     CHECK_INTERVAL="$INTERVAL"
     HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
+
+    is_empty "${PING_HOST:-}" || {
+
+        parse_resource "$PING_HOST" ||
+            die 2 "error: failed to resolve PING_HOST IP: '$PING_HOST'"
+
+        is_empty "${IPV4:-}" || {
+            is_valid_ip "$IPV4" ||
+                die 2 "error: variable 'PING_HOST': resolved to invalid IPv4 address: '$IPV4'"
+
+            is_not_empty "${PING4:-}" ||
+                die 2 "error: variable 'PING_HOST': resolved to IPv4, but IPv4 ping tool is missing"
+        }
+
+        is_empty "${IPV6:-}" || {
+            is_valid_ip "$IPV6" ||
+                die 2 "error: variable 'PING_HOST': resolved to invalid IPv6 address: '$IPV6'"
+
+            is_not_empty "${PING6:-}" ||
+                die 2 "error: variable 'PING_HOST': resolved to IPv6, but IPv6 ping tool is missing"
+        }
+
+        PING_HOST="$HOST"
+        PING_IPV4="${IPV4:-}"
+        PING_IPV6="${IPV6:-}"
+    }
 
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
@@ -790,17 +715,192 @@ set_variables ()
         ;;
     esac
 
-    is_empty "${PING_HOST:-}" || {
-        parse_resource "$PING_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" ||
-            die "error: failed to resolve PING_HOST IP: '$PING_HOST'"
-        PING_IPV4="${IPV4:-}"
-        PING_IPV6="${IPV6:-}"
-    }
-
     is_equal "$SPEEDTEST" "no" || {
         is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
-            parse_resource "$SPEEDTEST_HOST" && is_not_empty "${IPV4:-"${IPV6:-}"}" ||
+
+            case "${SPEEDTEST_SCOPE:-}" in
+                "")
+                ;;
+                *[\'\"\;\|\<\>\`\$]*)
+                    die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
+                ;;
+                /*)
+                    SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
+                ;;
+            esac
+
+            parse_resource "$SPEEDTEST_HOST" ||
                 die "error: failed to resolve SPEEDTEST_HOST IP: '$SPEEDTEST_HOST'"
+
+            is_empty "${IPV4:-}" || is_valid_ip "$IPV4" ||
+                die 2 "error: variable 'SPEEDTEST_HOST': resolved to invalid IPv4 address: '$IPV4'"
+
+            is_empty "${IPV6:-}" || is_valid_ip "$IPV6" ||
+                die 2 "error: variable 'SPEEDTEST_HOST': resolved to invalid IPv6 address: '$IPV6'"
+
+            is_diff "$HOST" "${IPV6:-}" || HOST="[$HOST]"
+            PING_IPV4="${IPV4:-}"
+            PING_IPV6="${IPV6:-}"
+
+            case "${PORT:-}" in
+                "")
+                ;;
+                *[!0123456789]*)
+                    die 2 "error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
+                ;;
+                *)
+                    HOST="$HOST:$PORT"
+                ;;
+            esac
+
+            RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+            SPEEDTEST_URL="${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$HOST${RESOURCE:-}"
+            SPEEDTEST_IPV4="${IPV4:-}"
+            SPEEDTEST_IPV6="${IPV6:-}"
+        }
+    }
+
+    case "${ROLE:=single}" in
+        master | master-advisor | single | slave)
+        ;;
+        *)
+            die 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
+        ;;
+    esac
+
+    if is_empty "${VIRTUAL_IPADDRESS:-}"
+    then
+        is_empty "${VIRTUAL_PORT:-}" || is_digit "$VIRTUAL_PORT" ||
+            die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+
+        is_equal "$ROLE" "single" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'master|master-advisor|slave'"
+    else
+        parse_resource "$VIRTUAL_IPADDRESS" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
+
+        is_equal "$HOST" "${IPV4:-}" || is_equal "$HOST" "${IPV6:-}" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': must be an IP address, but got: '$HOST'"
+
+        is_valid_ip "${IPV4:-"$IPV6"}" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': resolved to invalid IP address: '${IPV4:-"$IPV6"}'"
+
+        is_not_empty "${VIRTUAL_PORT:-}" ||
+            die 2 "error: variable 'VIRTUAL_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
+
+        is_port_free "$VIRTUAL_PORT" ||
+            die 2 "error: cannot start sync server/client, port $VIRTUAL_PORT is busy"
+
+        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
+        VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+    fi
+
+    case "${GATEWAYS:-}" in
+        *[![:space:],]*)
+            IFS="$IFS,"
+            set -- $GATEWAYS
+            IFS="$POSIX_IFS"
+            parse_gateway "$@"
+        ;;
+        *)
+            false
+        ;;
+    esac || die 2 "error: variable 'GATEWAYS': no valid gateways found: '${GATEWAYS:-}'"
+
+    # detect_sync_transport
+    # GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
+}
+
+is_interface ()
+{
+    ip link show ${1:-} >/dev/null 2>&1
+}
+
+is_port_free ()
+{
+    cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '
+        $2 ~ /:'"$(printf "%04X" "$1")"'$/ {
+            found = "yes"
+            exit
+        }
+        END {
+            if (found == "yes") exit 1
+            exit 0
+        }
+    '
+}
+
+is_netcat_server_capable ()
+{
+    case "${NETCAT_STAT:-}" in
+        *not_a_port*)
+            case "$NETCAT_STAT" in
+                *[uU]sage*)
+                ;;
+                *)
+                    return
+                ;;
+            esac
+        ;;
+    esac
+    return 1
+}
+
+detect_netcat_server ()
+{
+    NETCAT=""
+    NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
+    if is_netcat_server_capable
+    then
+        NETCAT="nc -l -p"
+        return
+    fi
+
+    NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
+    if is_netcat_server_capable
+    then
+        NETCAT="nc -l"
+        return
+    fi
+
+    return 1
+}
+
+detect_sync_transport ()
+{
+    RETURN=0
+
+    GATEWAYS_SERVER_DISPATCHER=""
+    GATEWAYS_CLIENT_DISPATCHER=""
+
+    for COMMAND in uhttpd telnetd nc
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            is_diff "$COMMAND" "nc" || detect_netcat_server || break
+            GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
+            break
+        fi
+    done
+
+    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+        die "error: no supported sync server found (uhttpd/telnetd/nc required)"
+
+    for COMMAND in wget curl nc
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            GATEWAYS_CLIENT_DISPATCHER="fetch_gateways_$COMMAND"
+            break
+        fi
+    done
+
+    is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" ||
+        die "error: no supported sync client found (wget/curl/nc required)"
+}
+
+set_variables ()
+{
 
             for DOWNLOAD_CMD in wget curl
             do
@@ -851,41 +951,21 @@ set_variables ()
                 ;;
             esac
 
-            case "${PORT:-}" in
-                "")
-                    SPEEDTEST_AUTHORITY_IPV4="${IPV4:+"$HOST"}"
-                    SPEEDTEST_AUTHORITY_IPV6="${IPV6:+"$HOST"}"
-                ;;
-                *[!0-9]*)
-                    die 2 "error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
-                ;;
-                *)
-                    SPEEDTEST_HOST_IPV4="${IPV4:+"$HOST:$PORT"}"
-                    is_equal "$HOST" "${IPV6:-}" &&
-                    SPEEDTEST_HOST_IPV6="${IPV6:+"[$HOST]:$PORT"}" ||
-                    SPEEDTEST_HOST_IPV4="${IPV6:+"$HOST:$PORT"}"
-                ;;
-            esac
+}
 
-            RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-            SPEEDTEST_URL_IPV4="${IPV4:+${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$SPEEDTEST_AUTHORITY_IPV4${RESOURCE:-}}"
-            SPEEDTEST_URL_IPV6="${IPV6:+${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$SPEEDTEST_AUTHORITY_IPV6${RESOURCE:-}}"
-            SPEEDTEST_IPV4="${IPV4:-}"
-            SPEEDTEST_IPV6="${IPV6:-}"
+check_dependencies ()
+{
+    RETURN=0
+    for COMMAND in date ip wc
+    do
+        type "$COMMAND" >/dev/null 2>&1 || {
+            say "dependency not found: '$COMMAND'" >&2
+            RETURN="$SAY_RETURN"
         }
-    }
+    done
+    is_equal "$RETURN" 0 || die "$RETURN"
 
-    case "${GATEWAYS:-}" in
-        *[![:space:],]*)
-            IFS="$IFS,"
-            set -- $GATEWAYS
-            IFS="$POSIX_IFS"
-            parse_gateway "$@"
-        ;;
-        *)
-            false
-        ;;
-    esac || die 2 "error: variable 'GATEWAYS': no valid gateways found: '${GATEWAYS:-}'"
+
 }
 
 run_ip ()
@@ -956,7 +1036,6 @@ EOF
     case "$GATEWAY_IP" in
         *:*)
             IP_CMD="ip -6"
-            SPEEDTEST_URL="${SPEEDTEST_URL_IPV6:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
             PING_IP="${PING_IPV6:-}"
             PING="${PING6:-}"
@@ -964,7 +1043,6 @@ EOF
         ;;
         *)
             IP_CMD="ip -4"
-            SPEEDTEST_URL="${SPEEDTEST_URL_IPV4:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
             PING_IP="${PING_IPV4:-}"
             PING="${PING4:-}"
@@ -1309,13 +1387,14 @@ reconcile_gateways ()
         sleep 1
     done
 
-    refresh_routing_table
+    is_equal "$STATE" "master-advisor" || refresh_routing_table
 }
 
 sync_gateways ()
 {
     is_diff "${FETCHED_GATEWAYS:-}" "${DEFAULT_GATEWAYS:-}" || {
         say "local routing state is already up to date"
+        refresh_routing_table
         return
     }
     say "applying new gateway configuration from master (${VIRTUAL_IPADDRESS%/*})"
@@ -1500,18 +1579,14 @@ main ()
 {
     say "switching to init mode"
     set_state "init"
+    check_base_dependencies
     check_permissions
-    say "loading configuration..."
     check_dependencies
-
-    CR="$(printf "\r")"
-    LF="
-"
-    POSIX_IFS="$(printf " \t")$LF"
-    IFS="$POSIX_IFS"
-
+    setup_core_env
+    say "loading configuration..."
     include_config
     set_variables
+
     remove_test_route || die
     say "initialization complete, system ready"
 
@@ -1541,28 +1616,28 @@ main ()
         do
             if is_vrrp_master
             then
-                is_equal "$STATE" "master" || {
-                    echo
-                    say "virtual IP detected on this host: '$VIRTUAL_IPADDRESS'"
-                    say "switching to master mode"
-                    set_state "master"
-                }
+                case "$STATE" in
+                    "master" | "master-advisor")
+                    ;;
+                    *)
+                        echo
+                        say "virtual IP detected on this host: '$VIRTUAL_IPADDRESS'"
+                        say "switching to $ROLE mode"
+                        set_state "$ROLE"
+                    ;;
+                esac
                 check_gateways || {
                     reconcile_gateways
                     update_gateways_state
                 } && share_gateways || stop_share_gateways
             else
                 case "$STATE" in
-                    "slave-single")
-                        fetch_gateways && {
-                            echo
-                            say "master reachable, switching back to slave mode"
-                            set_state "slave"
-                            sync_gateways
-                        }
-                    ;;
-                    "init" | "master" | "slave")
-                        is_diff "$STATE" "master" || stop_share_gateways
+                    "slave" | "master" | "master-advisor" | "init")
+                        case "$STATE" in
+                            "master" | "master-advisor")
+                                stop_share_gateways
+                            ;;
+                        esac
                         is_equal "$STATE" "slave" || {
                             echo
                             say "virtual IP not found on this host: '$VIRTUAL_IPADDRESS'"
@@ -1573,6 +1648,14 @@ main ()
                             say "master unreachable, switching to slave-single mode"
                             set_state "slave-single"
                             false
+                        }
+                    ;;
+                    "slave-single")
+                        fetch_gateways && {
+                            echo
+                            say "master reachable, switching back to slave mode"
+                            set_state "slave"
+                            sync_gateways
                         }
                     ;;
                 esac || {
