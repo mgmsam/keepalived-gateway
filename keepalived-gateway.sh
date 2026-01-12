@@ -626,13 +626,15 @@ parse_gateway ()
                 PROTO="IPv4"
                 is_not_empty "${PING4:-}" && {
 
-                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
-                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" || {
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$PING_HOST' ($PROTO)"
+                        say "WARNING: gateway '$GATEWAY': skipping internet check (direct IP check only)"
+                    }
 
-                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
-                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" || {
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$SPEEDTEST_HOST' ($PROTO)"
+                        say "WARNING: gateway '$GATEWAY': skipping speedtest check for this gateway"
+                    }
 
                     collect_metrics_ipv4
                     GATEWAYS_IPV4="${GATEWAYS_IPV4:+"$GATEWAYS_IPV4$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
@@ -642,13 +644,15 @@ parse_gateway ()
                 PROTO="IPv6"
                 is_not_empty "${PING6:-}" && {
 
-                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
-                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" || {
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$PING_HOST' ($PROTO)"
+                        say "WARNING: gateway '$GATEWAY': skipping internet check (direct IP check only)"
+                    }
 
-                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
-                        say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
+                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" || {
+                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$SPEEDTEST_HOST' ($PROTO)"
+                        say "WARNING: gateway '$GATEWAY': skipping speedtest check for this gateway"
+                    }
 
                     collect_metrics_ipv6
                     GATEWAYS_IPV6="${GATEWAYS_IPV6:+"$GATEWAYS_IPV6$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
