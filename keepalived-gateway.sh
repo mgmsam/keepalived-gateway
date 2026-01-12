@@ -435,7 +435,10 @@ parse_gateway_entry ()
         ;;
     esac
 
-    is_valid_ip "${GATEWAY:-}" || {
+    is_not_empty "${GATEWAY:-}" && {
+        GATEWAY="${GATEWAY#[}"
+        GATEWAY="${GATEWAY%]}"
+    } && is_valid_ip "${GATEWAY:-}" || {
         ERROR="gateway is not a valid IP address: '${GATEWAY:-}'"
         return 1
     }
