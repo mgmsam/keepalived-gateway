@@ -144,7 +144,7 @@ set_state ()
 check_base_dependencies ()
 {
     RETURN=0
-    for COMMAND in awk id ping printf sleep timeout
+    for COMMAND in awk id ip ping printf sleep timeout
     do
         type "$COMMAND" >/dev/null 2>&1 || {
             say "dependency not found: '$COMMAND'" >&2
@@ -806,6 +806,27 @@ set_variables ()
     # GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
 }
 
+check_functional_dependencies ()
+{
+    RETURN=0
+    MISSING_DEPS=""
+
+    is_equal "$SPEEDTEST" "no" || {
+
+        for COMMAND in date wc
+        do
+            type "$COMMAND" >/dev/null 2>&1 || {
+                RETURN=$?
+                MISSING_DEPS="${MISSING_DEPS:+"$MISSING_DEPS|"}$COMMAND"
+            }
+        done
+
+        is_empty "${MISSING_DEPS:-}" ||
+            say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'" >&2
+    }
+    is_equal "$RETURN" 0 || die "$RETURN"
+}
+
 is_interface ()
 {
     ip link show ${1:-} >/dev/null 2>&1
@@ -896,12 +917,6 @@ detect_sync_transport ()
 
 set_variables ()
 {
-
-            for DOWNLOAD_CMD in wget curl
-            do
-                type "$DOWNLOAD_CMD" >/dev/null 2>&1 && break || DOWNLOAD_CMD=""
-            done
-
             case "${DOWNLOAD_CMD:-}" in
                 "")
                     die 1 "error: speedtest requires 'wget' or 'curl', but neither was found."
@@ -945,22 +960,6 @@ set_variables ()
                     esac
                 ;;
             esac
-
-}
-
-check_dependencies ()
-{
-    RETURN=0
-    for COMMAND in date ip wc
-    do
-        type "$COMMAND" >/dev/null 2>&1 || {
-            say "dependency not found: '$COMMAND'" >&2
-            RETURN="$SAY_RETURN"
-        }
-    done
-    is_equal "$RETURN" 0 || die "$RETURN"
-
-
 }
 
 run_ip ()
@@ -1576,11 +1575,11 @@ main ()
     set_state "init"
     check_base_dependencies
     check_permissions
-    check_dependencies
     setup_core_env
     say "loading configuration..."
     include_config
     set_variables
+    check_functional_dependencies
 
     remove_test_route || die
     say "initialization complete, system ready"
