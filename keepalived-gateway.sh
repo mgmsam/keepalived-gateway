@@ -630,7 +630,7 @@ parse_gateway ()
                         say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
                         say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
 
-                    is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
                         say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
                         say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
 
@@ -646,7 +646,7 @@ parse_gateway ()
                         say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for PING_HOST: '$PING_HOST'"
                         say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
 
-                    is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
                         say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but failed to resolve '$PROTO' address for SPEEDTEST_HOST: '$SPEEDTEST_HOST'"
                         say "WARNING: gateway '$GATEWAY' will be checked by its IP only (direct reachability), skipping internet check."
 
@@ -686,7 +686,7 @@ set_variables ()
     is_empty "${PING_HOST:-}" || {
 
         parse_resource "$PING_HOST" ||
-            die 2 "error: failed to resolve PING_HOST IP: '$PING_HOST'"
+            die 2 "error: failed to resolve 'PING_HOST' IP: '$PING_HOST'"
 
         is_empty "${IPV4:-}" || is_valid_ip "$IPV4" ||
             die 2 "error: variable 'PING_HOST': resolved to invalid IPv4 address: '$IPV4'"
@@ -717,51 +717,51 @@ set_variables ()
         ;;
     esac
 
-    if is_equal "$SPEEDTEST" "yes"
-    then
-        is_empty "${SPEEDTEST_HOST:-}" && SPEEDTEST=no || {
+    is_equal "$SPEEDTEST" "no" || {
 
-            case "${SPEEDTEST_SCOPE:-}" in
-                "")
-                ;;
-                *[\'\"\;\|\<\>\`\$]*)
-                    die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
-                ;;
-                /*)
-                    SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
-                ;;
-            esac
+        is_not_empty "${SPEEDTEST_HOST:-}" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
 
-            parse_resource "$SPEEDTEST_HOST" ||
-                die "error: failed to resolve SPEEDTEST_HOST IP: '$SPEEDTEST_HOST'"
+        parse_resource "$SPEEDTEST_HOST" ||
+            die "error: failed to resolve 'SPEEDTEST_HOST' IP: '$SPEEDTEST_HOST'"
 
-            is_empty "${IPV4:-}" || is_valid_ip "$IPV4" ||
-                die 2 "error: variable 'SPEEDTEST_HOST': resolved to invalid IPv4 address: '$IPV4'"
+        is_empty "${IPV4:-}" || is_valid_ip "$IPV4" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': resolved to invalid IPv4 address: '$IPV4'"
 
-            is_empty "${IPV6:-}" || is_valid_ip "$IPV6" ||
-                die 2 "error: variable 'SPEEDTEST_HOST': resolved to invalid IPv6 address: '$IPV6'"
+        is_empty "${IPV6:-}" || is_valid_ip "$IPV6" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': resolved to invalid IPv6 address: '$IPV6'"
 
-            is_diff "$HOST" "${IPV6:-}" || HOST="[$HOST]"
-            PING_IPV4="${IPV4:-}"
-            PING_IPV6="${IPV6:-}"
+        is_diff "$HOST" "${IPV6:-}" || HOST="[$HOST]"
+        PING_IPV4="${IPV4:-}"
+        PING_IPV6="${IPV6:-}"
 
-            case "${PORT:-}" in
-                "")
-                ;;
-                *[!0123456789]*)
-                    die 2 "error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
-                ;;
-                *)
-                    HOST="$HOST:$PORT"
-                ;;
-            esac
+        case "${PORT:-}" in
+            "")
+            ;;
+            *[!0123456789]*)
+                die 2 "error: variable 'SPEEDTEST_HOST': invalid port in authority '$AUTHORITY'"
+            ;;
+            *)
+                HOST="$HOST:$PORT"
+            ;;
+        esac
 
-            RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-            SPEEDTEST_URL="${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$HOST${RESOURCE:-}"
-            SPEEDTEST_IPV4="${IPV4:-}"
-            SPEEDTEST_IPV6="${IPV6:-}"
-        }
-    fi
+        case "${SPEEDTEST_SCOPE:-}" in
+            "")
+            ;;
+            *[\'\"\;\|\<\>\`\$]*)
+                die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
+            ;;
+            /*)
+                SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
+            ;;
+        esac
+
+        RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+        SPEEDTEST_URL="${SCHEME:-http}://${USER_INFO:+$USER_INFO@}$HOST${RESOURCE:-}"
+        SPEEDTEST_IPV4="${IPV4:-}"
+        SPEEDTEST_IPV6="${IPV6:-}"
+    }
 
     case "${ROLE:=single}" in
         master | master-advisor | single | slave)
@@ -789,7 +789,7 @@ set_variables ()
             die 2 "error: variable 'VIRTUAL_IPADDRESS': resolved to invalid IP address: '${IPV4:-"$IPV6"}'"
 
         is_not_empty "${VIRTUAL_PORT:-}" ||
-            die 2 "error: variable 'VIRTUAL_PORT' is required when 'VIRTUAL_IPADDRESS' is defined"
+            die 2 "error: variable 'VIRTUAL_PORT': is required when 'VIRTUAL_IPADDRESS' is defined"
 
         is_port_free "$VIRTUAL_PORT" ||
             die 2 "error: cannot start sync server/client, port $VIRTUAL_PORT is busy"
