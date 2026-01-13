@@ -43,8 +43,28 @@
 
 `is_port_free`
 
-- [ ] Избавиться от `cat`
-- [ ] Избавиться от Linux-isms.
+- [ ] 1. Избавиться от `cat`
+
+- [ ] 2. Избавиться от Linux-isms.
+
+- [ ] 3. Взависимости от решения `2.`, заменить `printf` переносом его обязанностей в `awk`:
+
+         ```sh
+         cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk -v port="$1" '
+             BEGIN {
+                 # Формируем паттерн HEX-порта: :0050 (для 80 порта)
+                 # В конце добавляем $, чтобы исключить частичные совпадения
+                 hex_port = sprintf(":%04X$", port)
+             }
+             $2 ~ hex_port {
+                 found = 1
+                 exit
+             }
+             END {
+                 exit (found == 1 ? 1 : 0)
+             }
+         '
+         ```
 
 `remove_test_route`
 
