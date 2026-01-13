@@ -6,6 +6,23 @@
 
 ## Исправить функции
 
+`bit2Human`
+
+- [ ] Заменить `printf` на что-то вроде:
+
+      ```sh
+      if test "$REMAINS" -lt 10
+      then
+          REMAINS=".0$REMAINS"
+      else
+          REMAINS=".$REMAINS"
+      fi
+      ```
+
+`get_obsolete_routes`
+
+- [ ] Заменить `printf` на `echo` или `<<EOF`
+
 `count_metrics`
 
 - [X] Избавиться от `awk`. Количество можно получить используя `set -- $METRICS` которые можно заведомо собирать.
