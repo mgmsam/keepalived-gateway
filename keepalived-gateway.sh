@@ -286,18 +286,39 @@ resolve_ips ()
         ' /etc/hosts)
 }
 
+is_ipv4 ()
+{
+    IFS="."
+    set -- $1
+    IFS="$POSIX_IFS"
+    is_equal $# 4 || return 1
+    for OCTET
+    do
+        case "$OCTET" in
+            [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
+            ;;
+            *)
+                return 1
+            ;;
+        esac
+    done
+}
+
 parse_resource ()
 {
+    ERROR=""
     SCHEME=""
     USER_INFO=""
     USER=""
     PASS=""
+    WWW=""
     AUTHORITY=""
     MASK=""
     PORT=""
     RESOURCE=""
     IPV4=""
     IPV6=""
+    FAMILY=""
 
     HOST="$1"
     HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
@@ -305,14 +326,24 @@ parse_resource ()
     case "$HOST" in
         *://*)
             SCHEME="${HOST%%://*}"
+            is_not_empty "${SCHEME:-}" || {
+                ERROR="protocol scheme is empty"
+                return 1
+            }
             HOST="${HOST#*://}"
             HOST="${HOST#"${HOST%%[!/]*}"}"
+        ;;
+    esac
+    case "$HOST" in
+        www.*)
+            WWW=1
         ;;
     esac
     case "$HOST" in
         */*)
             AUTHORITY="${HOST%%/*}"
             RESOURCE="${HOST#*/}"
+            is_not_empty "${SCHEME:-"${WWW:-}"}" ||
             case "$RESOURCE" in
                 [0-9] | [0-9][0-9] | 1[0-2][0-8])
                     MASK="$RESOURCE"
@@ -336,6 +367,38 @@ parse_resource ()
                 ;;
                 *)
                     USER="$USER_INFO"
+                ;;
+            esac
+            case "${USER:-}" in
+                "")
+                ;;
+                *[:@#/?]*)
+                    ERROR="user: contains illegal delimiters, use URL encoding"
+                    return 2
+                ;;
+                *[\'\"\;\|\<\>\`\$]*)
+                    ERROR="user contains illegal shell characters, use URL encoding"
+                    return 3
+                ;;
+                *[[:blank:]]*)
+                    ERROR="user: spaces are not allowed, use URL encoding"
+                    return 4
+                ;;
+            esac
+            case "${PASS:-}" in
+                "")
+                ;;
+                *[\`\"\$]*)
+                    ERROR="password contains illegal shell characters, use URL encoding"
+                    return 5
+                ;;
+                *[@#/?]*)
+                    ERROR="password contains illegal URL delimiters, use URL encoding"
+                    return 6
+                ;;
+                *[[:blank:]]*)
+                    ERROR="password: spaces are not allowed, use URL encoding"
+                    return 7
                 ;;
             esac
         ;;
@@ -366,52 +429,65 @@ parse_resource ()
         ;;
     esac
     case "${HOST:-}" in
-        "")
-            return 1
+        "" | *[!0-9a-zA-Z.:_-]*)
+            ERROR="host contains illegal characters or is empty"
+            return 8
         ;;
-        *:*:*)
-            IPV6="$HOST"
-        ;;
-        *[a-zA-Z]*)
-            resolve_ips "$HOST"
-        ;;
-        *)
-            IPV4="$HOST"
-        ;;
-    esac
-    is_not_empty "${IPV4:-"${IPV6:-}"}"
-}
-
-is_valid_ip ()
-{
-    case "${1:-}" in
-        *.*.*.*)
-            IFS="."
-            set -- $1
-            IFS="$POSIX_IFS"
-            is_equal $# 4 || return 1
-            for OCTET
-            do
-                case "$OCTET" in
-                    [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
-                    ;;
-                    *)
-                        return 1
-                    ;;
-                esac
-            done
-            FAMILY="inet"
-        ;;
-        *:*:*)
-            case "$1" in
-                *[!0-9a-fA-F:]*)
-                    return 1
+        *[!0-9a-fA-F:]*)
+            case "$HOST" in
+                *[a-zA-Z]*)
+                    case "$HOST" in
+                        -*)
+                            ERROR="domain name cannot start with a hyphen"
+                            return 9
+                        ;;
+                        *..*)
+                            ERROR="domain name contains empty labels (double dots)"
+                            return 10
+                        ;;
+                    esac
+                    FQDN="$HOST"
+                ;;
+                *.*.*.*)
+                    is_ipv4 "$HOST" || {
+                        ERROR="invalid IPv4 address format"
+                        return 11
+                    }
+                    IPV4="$HOST"
+                    FAMILY="inet"
+                ;;
+                *)
+                    ERROR="unrecognized host format (missing letters or invalid IPv4)"
+                    return 12
                 ;;
             esac
-            FAMILY="inet6"
+        ;;
+        *:*:*)
+            case "$HOST" in
+                *:*:*:*:*:*:*:*:*)
+                    ERROR="IPv6 address has too many segments"
+                    return 13
+                ;;
+                *[!:]*)
+                    IPV6="$HOST"
+                    FAMILY="inet6"
+                ;;
+                *)
+                    ERROR="invalid IPv6 format (empty address)"
+                    return 14
+                ;;
+            esac
+        ;;
+        *:*)
+            ERROR="invalid port separator or malformed IPv6"
+            return 15
+        ;;
+        *[!0-9]*)
+            FQDN="$HOST"
         ;;
         *)
-            return 1
+            ERROR="numeric-only hostnames are not allowed to avoid IP collision"
+            return 16
         ;;
     esac
 }
@@ -677,6 +753,102 @@ parse_gateway ()
 }
 
 set_variables ()
+{
+    DEFAULT_INTERFACE="${INTERFACE:-}"
+
+    is_digit "${METRIC:=0}" ||
+        die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
+    METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+    DEFAULT_METRIC="${METRIC:-}"
+
+    is_not_empty "${GATEWAYS:-}" ||
+        die 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-30}" ||
+        die 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
+    CHECK_INTERVAL="$INTERVAL"
+    HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
+
+    is_empty "${PING_HOST:-}" || {
+        parse_resource "$PING_HOST" ||
+            die 2 "error: variable 'PING_HOST': $ERROR: '$PING_HOST'"
+
+        PING_HOST="${FQDN:-}"
+        PING_IPV4="${IPV4:-}"
+        PING_IPV6="${IPV6:-}"
+    }
+
+    case "${SPEEDTEST:-}" in
+        "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
+            SPEEDTEST=no
+        ;;
+        1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
+            SPEEDTEST=yes
+        ;;
+        *)
+            die 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
+        ;;
+    esac
+
+    case "${SPEEDTEST_SCOPE:-}" in
+        "")
+        ;;
+        *[\'\"\;\|\<\>\`\$]*)
+            die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
+        ;;
+        /*)
+            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
+        ;;
+    esac
+
+    is_empty "${SPEEDTEST_HOST:-}" && {
+        is_equal "$SPEEDTEST" "no" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
+    } || {
+        parse_resource "$SPEEDTEST_HOST" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': $ERROR: '$SPEEDTEST_HOST'"
+
+        SPEEDTEST_HOST="${FQDN:-}"
+        SPEEDTEST_IPV4="${IPV4:-}"
+        SPEEDTEST_IPV6="${IPV6:-}"
+        RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+        SPEEDTEST_SCHEME="${SCHEME:-http}"
+        SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
+    }
+
+    case "${ROLE:=single}" in
+        cluster | master | master-advisor | single | slave)
+        ;;
+        *)
+            die 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
+        ;;
+    esac
+
+    is_empty "${VIRTUAL_IPADDRESS:-}" && {
+        is_equal "$ROLE" "single" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
+    } || {
+        parse_resource "$VIRTUAL_IPADDRESS" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
+
+        is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
+
+        is_not_empty "${IPV4:-"${IPV6:-}"}" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
+
+        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
+        VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+    }
+
+    is_empty "${VIRTUAL_PORT:-}" && {
+        is_equal "$ROLE" "single" ||
+            die 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
+    } || is_digit "$VIRTUAL_PORT" ||
+        die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+}
+
+deprecated_set_variables ()
 {
     DEFAULT_INTERFACE="${INTERFACE:-}"
 
