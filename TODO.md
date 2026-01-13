@@ -17,6 +17,8 @@
       else
           REMAINS=".$REMAINS"
       fi
+      # или
+      is_diff ${#REMAINS} 1 && REMAINS=".$REMAINS" || REMAINS=".0$REMAINS"
       ```
 
 `get_obsolete_routes`
