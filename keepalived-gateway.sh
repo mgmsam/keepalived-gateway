@@ -202,90 +202,6 @@ include_config ()
           . "$CONFIG_FILE" || die
 }
 
-parse_interval ()
-{
-    case "${2%[smhdwMy]}" in
-        "" | *[!0123456789]*)
-            return 1
-        ;;
-    esac
-    case "$2" in
-        *m) INTERVAL=$((${2%m} * 60)) ;;
-        *h) INTERVAL=$((${2%h} * 3600)) ;;
-        *d) INTERVAL=$((${2%d} * 86400)) ;;
-        *w) INTERVAL=$((${2%w} * 604800)) ;;
-        *M) INTERVAL=$((${2%M} * 2678400)) ;;
-        *y) INTERVAL=$((${2%y} * 32140800)) ;;
-         *) INTERVAL="${2%s}" ;;
-    esac
-}
-
-format_duration ()
-{
-    S=${1:-0}
-
-    D=$((S / 86400))
-    S=$((S % 86400))
-    H=$((S / 3600))
-    S=$((S % 3600))
-    M=$((S / 60))
-    S=$((S % 60))
-
-    RESULT=""
-    test "$D" -gt 0 && RESULT="${D}d" || :
-    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
-    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
-    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
-
-    puts "$RESULT"
-}
-
-resolve_ips ()
-{
-    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
-        /PING/ {
-            split($0, a, /[()]/)
-            print a[2]
-            exit
-        }
-    ')" || :
-
-    is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
-            /PING/ {
-                split($0, a, /[()]/)
-                print a[2]
-                exit
-            }
-        ')" || :
-
-    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
-
-    is_not_empty "${IPV4:-}" ||
-        IPV4=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /\./) {
-                        print $1
-                        exit
-                    }
-                }
-            }
-        ' /etc/hosts)
-
-    is_not_empty "${IPV6:-}" ||
-        IPV6=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /:/) {
-                        print $1
-                        exit
-                    }
-                }
-            }
-        ' /etc/hosts)
-}
-
 is_ipv4 ()
 {
     IFS="."
@@ -490,6 +406,207 @@ parse_resource ()
             return 16
         ;;
     esac
+}
+
+parse_interval ()
+{
+    case "${2%[smhdwMy]}" in
+        "" | *[!0123456789]*)
+            return 1
+        ;;
+    esac
+    case "$2" in
+        *m) INTERVAL=$((${2%m} * 60)) ;;
+        *h) INTERVAL=$((${2%h} * 3600)) ;;
+        *d) INTERVAL=$((${2%d} * 86400)) ;;
+        *w) INTERVAL=$((${2%w} * 604800)) ;;
+        *M) INTERVAL=$((${2%M} * 2678400)) ;;
+        *y) INTERVAL=$((${2%y} * 32140800)) ;;
+         *) INTERVAL="${2%s}" ;;
+    esac
+}
+
+format_duration ()
+{
+    S=${1:-0}
+
+    D=$((S / 86400))
+    S=$((S % 86400))
+    H=$((S / 3600))
+    S=$((S % 3600))
+    M=$((S / 60))
+    S=$((S % 60))
+
+    RESULT=""
+    test "$D" -gt 0 && RESULT="${D}d" || :
+    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
+    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
+    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
+
+    puts "$RESULT"
+}
+
+set_variables ()
+{
+    DEFAULT_INTERFACE="${INTERFACE:-}"
+
+    is_digit "${METRIC:=0}" ||
+        die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
+    METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+    DEFAULT_METRIC="${METRIC:-}"
+
+    is_not_empty "${GATEWAYS:-}" ||
+        die 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-30}" ||
+        die 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
+    CHECK_INTERVAL="$INTERVAL"
+    HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
+
+    is_empty "${PING_HOST:-}" || {
+        parse_resource "$PING_HOST" ||
+            die 2 "error: variable 'PING_HOST': $ERROR: '$PING_HOST'"
+
+        PING_HOST="${FQDN:-}"
+        PING_IPV4="${IPV4:-}"
+        PING_IPV6="${IPV6:-}"
+    }
+
+    case "${SPEEDTEST:-}" in
+        "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
+            SPEEDTEST=no
+        ;;
+        1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
+            SPEEDTEST=yes
+        ;;
+        *)
+            die 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
+        ;;
+    esac
+
+    case "${SPEEDTEST_SCOPE:-}" in
+        "")
+        ;;
+        *[\'\"\;\|\<\>\`\$]*)
+            die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
+        ;;
+        /*)
+            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
+        ;;
+    esac
+
+    is_empty "${SPEEDTEST_HOST:-}" && {
+        is_equal "$SPEEDTEST" "no" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
+    } || {
+        parse_resource "$SPEEDTEST_HOST" ||
+            die 2 "error: variable 'SPEEDTEST_HOST': $ERROR: '$SPEEDTEST_HOST'"
+
+        SPEEDTEST_HOST="${FQDN:-}"
+        SPEEDTEST_IPV4="${IPV4:-}"
+        SPEEDTEST_IPV6="${IPV6:-}"
+        RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+        SPEEDTEST_SCHEME="${SCHEME:-http}"
+        SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
+    }
+
+    case "${ROLE:=single}" in
+        cluster | master | master-advisor | single | slave)
+        ;;
+        *)
+            die 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
+        ;;
+    esac
+
+    is_empty "${VIRTUAL_IPADDRESS:-}" && {
+        is_equal "$ROLE" "single" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
+    } || {
+        parse_resource "$VIRTUAL_IPADDRESS" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
+
+        is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
+
+        is_not_empty "${IPV4:-"${IPV6:-}"}" ||
+            die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
+
+        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
+        VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+    }
+
+    is_empty "${VIRTUAL_PORT:-}" && {
+        is_equal "$ROLE" "single" ||
+            die 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
+    } || is_digit "$VIRTUAL_PORT" ||
+        die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+}
+
+check_functional_dependencies ()
+{
+    RETURN=0
+    MISSING_DEPS=""
+
+    is_equal "$SPEEDTEST" "no" || {
+
+        for COMMAND in date wc
+        do
+            type "$COMMAND" >/dev/null 2>&1 || {
+                RETURN=$?
+                MISSING_DEPS="${MISSING_DEPS:+"$MISSING_DEPS|"}$COMMAND"
+            }
+        done
+
+        is_empty "${MISSING_DEPS:-}" ||
+            say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'" >&2
+    }
+    is_equal "$RETURN" 0 || die "$RETURN"
+}
+
+resolve_ips ()
+{
+    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
+        /PING/ {
+            split($0, a, /[()]/)
+            print a[2]
+            exit
+        }
+    ')" || :
+
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
+            /PING/ {
+                split($0, a, /[()]/)
+                print a[2]
+                exit
+            }
+        ')" || :
+
+    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
+
+    is_not_empty "${IPV4:-}" ||
+        IPV4=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /\./) {
+                        print $1
+                        exit
+                    }
+                }
+            }
+        ' /etc/hosts)
+
+    is_not_empty "${IPV6:-}" ||
+        IPV6=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /:/) {
+                        print $1
+                        exit
+                    }
+                }
+            }
+        ' /etc/hosts)
 }
 
 parse_gateway_entry ()
@@ -752,102 +869,6 @@ parse_gateway ()
     TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
 }
 
-set_variables ()
-{
-    DEFAULT_INTERFACE="${INTERFACE:-}"
-
-    is_digit "${METRIC:=0}" ||
-        die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
-    METRIC="${METRIC#"${METRIC%%[!0]*}"}"
-    DEFAULT_METRIC="${METRIC:-}"
-
-    is_not_empty "${GATEWAYS:-}" ||
-        die 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
-
-    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-30}" ||
-        die 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
-    CHECK_INTERVAL="$INTERVAL"
-    HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
-
-    is_empty "${PING_HOST:-}" || {
-        parse_resource "$PING_HOST" ||
-            die 2 "error: variable 'PING_HOST': $ERROR: '$PING_HOST'"
-
-        PING_HOST="${FQDN:-}"
-        PING_IPV4="${IPV4:-}"
-        PING_IPV6="${IPV6:-}"
-    }
-
-    case "${SPEEDTEST:-}" in
-        "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
-            SPEEDTEST=no
-        ;;
-        1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
-            SPEEDTEST=yes
-        ;;
-        *)
-            die 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
-        ;;
-    esac
-
-    case "${SPEEDTEST_SCOPE:-}" in
-        "")
-        ;;
-        *[\'\"\;\|\<\>\`\$]*)
-            die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
-        ;;
-        /*)
-            SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
-        ;;
-    esac
-
-    is_empty "${SPEEDTEST_HOST:-}" && {
-        is_equal "$SPEEDTEST" "no" ||
-            die 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
-    } || {
-        parse_resource "$SPEEDTEST_HOST" ||
-            die 2 "error: variable 'SPEEDTEST_HOST': $ERROR: '$SPEEDTEST_HOST'"
-
-        SPEEDTEST_HOST="${FQDN:-}"
-        SPEEDTEST_IPV4="${IPV4:-}"
-        SPEEDTEST_IPV6="${IPV6:-}"
-        RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-        SPEEDTEST_SCHEME="${SCHEME:-http}"
-        SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
-    }
-
-    case "${ROLE:=single}" in
-        cluster | master | master-advisor | single | slave)
-        ;;
-        *)
-            die 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
-        ;;
-    esac
-
-    is_empty "${VIRTUAL_IPADDRESS:-}" && {
-        is_equal "$ROLE" "single" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
-    } || {
-        parse_resource "$VIRTUAL_IPADDRESS" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
-
-        is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
-
-        is_not_empty "${IPV4:-"${IPV6:-}"}" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
-
-        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
-        VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
-    }
-
-    is_empty "${VIRTUAL_PORT:-}" && {
-        is_equal "$ROLE" "single" ||
-            die 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
-    } || is_digit "$VIRTUAL_PORT" ||
-        die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
-}
-
 deprecated_set_variables ()
 {
     DEFAULT_INTERFACE="${INTERFACE:-}"
@@ -991,27 +1012,6 @@ deprecated_set_variables ()
 
     # detect_sync_transport
     # GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
-}
-
-check_functional_dependencies ()
-{
-    RETURN=0
-    MISSING_DEPS=""
-
-    is_equal "$SPEEDTEST" "no" || {
-
-        for COMMAND in date wc
-        do
-            type "$COMMAND" >/dev/null 2>&1 || {
-                RETURN=$?
-                MISSING_DEPS="${MISSING_DEPS:+"$MISSING_DEPS|"}$COMMAND"
-            }
-        done
-
-        is_empty "${MISSING_DEPS:-}" ||
-            say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'" >&2
-    }
-    is_equal "$RETURN" 0 || die "$RETURN"
 }
 
 is_interface ()
