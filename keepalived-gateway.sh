@@ -104,7 +104,7 @@ fi
 
 say ()
 {
-    SAY_RETURN=$?
+    EXIT_CODE=$?
     PUTS_OPTIONS=""
     while is_diff $# 0
     do
@@ -118,7 +118,7 @@ say ()
                 break
             ;;
             *)
-                SAY_RETURN=$1
+                EXIT_CODE=$1
             ;;
         esac
         shift
@@ -132,56 +132,13 @@ say ()
 die ()
 {
     say "$@" >&2
-    exit "$SAY_RETURN"
+    exit "$EXIT_CODE"
 }
 
 set_state ()
 {
     STATE="$1"
     LOG_PREFIX="kg [$1]"
-}
-
-check_base_dependencies ()
-{
-    RETURN=0
-    for COMMAND in awk id ip ping printf sleep timeout
-    do
-        type "$COMMAND" >/dev/null 2>&1 || {
-            say "dependency not found: '$COMMAND'" >&2
-            RETURN="$SAY_RETURN"
-        }
-    done
-    is_equal "$RETURN" 0 || die "$RETURN"
-
-    if ping -4 -c 1 -w 1 127.0.0.1
-    then
-        PING4="ping -4"
-    else
-        PING4="ping"
-    fi >/dev/null 2>&1
-
-    if ping -6 -c 1 -w 1 ::1
-    then
-        PING6="ping -6"
-    elif ping6 -c 1 -w 1 ::1
-    then
-        PING6="ping6"
-    else
-        PING6=""
-    fi >/dev/null 2>&1
-
-    if timeout -t 1 sleep 0
-    then
-        TIMEOUT="timeout -t"
-    else
-        TIMEOUT="timeout"
-    fi >/dev/null 2>&1
-}
-
-check_permissions ()
-{
-    is_equal "$(id -u)" 0 ||
-        die "error: must be run as root to manage routes and interfaces."
 }
 
 setup_core_env ()
@@ -198,8 +155,14 @@ setup_core_env ()
 include_config ()
 {
     CONFIG_FILE="/etc/keepalived-gateway.conf"
-    is_file "$CONFIG_FILE" || die "error: no such config file: '$CONFIG_FILE'"
-          . "$CONFIG_FILE" || die
+    if is_file "$CONFIG_FILE"
+    then
+        . "$CONFIG_FILE" || EXIT_CODE=$?
+    else
+        say "error: no such config file: '$CONFIG_FILE'"
+        EXIT_CODE=$?
+    fi
+    return $EXIT_CODE
 }
 
 is_ipv4 ()
@@ -450,26 +413,26 @@ set_variables ()
 {
     DEFAULT_INTERFACE="${INTERFACE:-}"
 
-    is_digit "${METRIC:=0}" ||
-        die 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
-    METRIC="${METRIC#"${METRIC%%[!0]*}"}"
-    DEFAULT_METRIC="${METRIC:-}"
+    is_digit "${METRIC:=0}" && {
+        METRIC="${METRIC#"${METRIC%%[!0]*}"}"
+        DEFAULT_METRIC="${METRIC:-}"
+    } || say 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
 
     is_not_empty "${GATEWAYS:-}" ||
-        die 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+        say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
 
-    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-30}" ||
-        die 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
-    CHECK_INTERVAL="$INTERVAL"
-    HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-30}" && {
+        CHECK_INTERVAL="$INTERVAL"
+        HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
+    } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
+
 
     is_empty "${PING_HOST:-}" || {
-        parse_resource "$PING_HOST" ||
-            die 2 "error: variable 'PING_HOST': $ERROR: '$PING_HOST'"
-
-        PING_HOST="${FQDN:-}"
-        PING_IPV4="${IPV4:-}"
-        PING_IPV6="${IPV6:-}"
+        parse_resource "$PING_HOST" && {
+            PING_HOST="${FQDN:-}"
+            PING_IPV4="${IPV4:-}"
+            PING_IPV6="${IPV6:-}"
+        } || say 2 "error: variable 'PING_HOST': $ERROR: '$PING_HOST'"
     }
 
     case "${SPEEDTEST:-}" in
@@ -480,7 +443,7 @@ set_variables ()
             SPEEDTEST=yes
         ;;
         *)
-            die 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
+            say 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
         ;;
     esac
 
@@ -488,7 +451,7 @@ set_variables ()
         "")
         ;;
         *[\'\"\;\|\<\>\`\$]*)
-            die 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
+            say 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
         ;;
         /*)
             SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
@@ -497,49 +460,84 @@ set_variables ()
 
     is_empty "${SPEEDTEST_HOST:-}" && {
         is_equal "$SPEEDTEST" "no" ||
-            die 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
+            say 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
     } || {
-        parse_resource "$SPEEDTEST_HOST" ||
-            die 2 "error: variable 'SPEEDTEST_HOST': $ERROR: '$SPEEDTEST_HOST'"
-
-        SPEEDTEST_HOST="${FQDN:-}"
-        SPEEDTEST_IPV4="${IPV4:-}"
-        SPEEDTEST_IPV6="${IPV6:-}"
-        RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-        SPEEDTEST_SCHEME="${SCHEME:-http}"
-        SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
+        parse_resource "$SPEEDTEST_HOST" && {
+            SPEEDTEST_HOST="${FQDN:-}"
+            SPEEDTEST_IPV4="${IPV4:-}"
+            SPEEDTEST_IPV6="${IPV6:-}"
+            RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+            SPEEDTEST_SCHEME="${SCHEME:-http}"
+            SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
+        } || say 2 "error: variable 'SPEEDTEST_HOST': $ERROR: '$SPEEDTEST_HOST'"
     }
 
     case "${ROLE:=single}" in
         cluster | master | master-advisor | single | slave)
         ;;
         *)
-            die 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
+            say 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
         ;;
     esac
 
     is_empty "${VIRTUAL_IPADDRESS:-}" && {
         is_equal "$ROLE" "single" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || {
-        parse_resource "$VIRTUAL_IPADDRESS" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
+        parse_resource "$VIRTUAL_IPADDRESS" && {
+            VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
+            VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+        } || say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
 
         is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
 
         is_not_empty "${IPV4:-"${IPV6:-}"}" ||
-            die 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
-
-        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
-        VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
         is_equal "$ROLE" "single" ||
-            die 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
+            say 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || is_digit "$VIRTUAL_PORT" ||
-        die 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+            say 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+}
+
+check_base_dependencies ()
+{
+    RETURN=0
+    for COMMAND in awk id ip ping printf sleep timeout
+    do
+        type "$COMMAND" >/dev/null 2>&1 || {
+            say "dependency not found: '$COMMAND'" >&2
+            RETURN="$SAY_RETURN"
+        }
+    done
+    is_equal "$RETURN" 0 || die "$RETURN"
+
+    if ping -4 -c 1 -w 1 127.0.0.1
+    then
+        PING4="ping -4"
+    else
+        PING4="ping"
+    fi >/dev/null 2>&1
+
+    if ping -6 -c 1 -w 1 ::1
+    then
+        PING6="ping -6"
+    elif ping6 -c 1 -w 1 ::1
+    then
+        PING6="ping6"
+    else
+        PING6=""
+    fi >/dev/null 2>&1
+
+    if timeout -t 1 sleep 0
+    then
+        TIMEOUT="timeout -t"
+    else
+        TIMEOUT="timeout"
+    fi >/dev/null 2>&1
 }
 
 check_functional_dependencies ()
@@ -561,6 +559,12 @@ check_functional_dependencies ()
             say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'" >&2
     }
     is_equal "$RETURN" 0 || die "$RETURN"
+}
+
+check_permissions ()
+{
+    is_equal "$(id -u)" 0 ||
+        say "error: must be run as root to manage routes and interfaces."
 }
 
 resolve_ips ()
@@ -1758,15 +1762,16 @@ EOF
 
 main ()
 {
+    EXIT_CODE=0
     say "switching to init mode"
     set_state "init"
-    check_base_dependencies
-    check_permissions
     setup_core_env
     say "loading configuration..."
-    include_config
-    set_variables
+    include_config && set_variables
+    check_base_dependencies
     check_functional_dependencies
+    check_permissions
+    is_equal $EXIT_CODE 0 || die
 
     remove_test_route || die
     say "initialization complete, system ready"
