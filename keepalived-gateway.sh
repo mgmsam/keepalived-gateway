@@ -268,14 +268,18 @@ is_ipv4 ()
     IFS="."
     set -- $1
     IFS="$POSIX_IFS"
-    is_equal $# 4 || return 1
+    is_equal $# 4 || {
+        ERROR="invalid IPv4: address must consist of exactly 4 octets"
+        return 1
+    }
     for i
     do
         case "$i" in
             [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
             ;;
             *)
-                return 1
+                ERROR="invalid IPv4 octet: value must be between 0 and 255"
+                return 2
             ;;
         esac
     done
@@ -285,11 +289,13 @@ is_ipv6 ()
 {
     case "${1:-}" in
         *[!0-9a-fA-F:]* | *::*::*)
+            ERROR="IPv6 contains multiple zero compressions (::)"
             return 1
         ;;
         *:*)
         ;;
         *)
+            ERROR="invalid IPv6: address must contain at least one colon"
             return 2
         ;;
     esac
@@ -305,10 +311,11 @@ is_ipv6 ()
     esac
     case "$1" in
         *:*:*:*:*:*:*:*:*)
+            ERROR="IPv6 address has too many segments"
             return 3
         ;;
     esac
-    IPV6="$1"
+    _IPV6="$1"
     IFS=":"
     set -- $1
     IFS="$POSIX_IFS"
@@ -316,10 +323,11 @@ is_ipv6 ()
     do
         case "$i" in
             "")
-                case "$IPV6" in
+                case "$_IPV6" in
                     *::*)
                     ;;
                     *)
+                        ERROR="invalid IPv6: empty segment requires double colon (::) compression"
                         return 4
                     ;;
                 esac
@@ -327,6 +335,7 @@ is_ipv6 ()
             [0-9a-fA-F] | [0-9a-fA-F][0-9a-fA-F] | [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] | [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
             ;;
             *)
+                ERROR="invalid IPv6 hextet: segment exceeds 4 hex digits or is malformed"
                 return 5
             ;;
         esac
@@ -459,12 +468,8 @@ parse_resource ()
     esac
     is_empty "${PORT:-}" || is_port "$PORT" ||
         case $? in
-            1)
-                return 8
-            ;;
-            *)
-                return 9
-            ;;
+            1) return 8 ;;
+            *) return 9 ;;
         esac
     case "${HOST:-}" in
         "" | *[!0-9a-zA-Z.:_-]*)
@@ -487,10 +492,7 @@ parse_resource ()
                     FQDN="$HOST"
                 ;;
                 *.*.*.*)
-                    is_ipv4 "$HOST" || {
-                        ERROR="invalid IPv4 address format"
-                        return 13
-                    }
+                    is_ipv4 "$HOST" || return 13
                     IPV4="$HOST"
                     FAMILY="inet"
                 ;;
@@ -501,27 +503,14 @@ parse_resource ()
             esac
         ;;
         *:*:*)
-            is_ipv6 "$HOST" || {
+            is_ipv6 "$HOST" ||
                 case $? in
-                    1)
-                        RETURN=15 ERROR="IPv6 contains multiple zero compressions (::)"
-                    ;;
-                    2)
-                        RETURN=16 ERROR="invalid IPv6: address must contain at least one colon"
-                    ;;
-                    3)
-                        RETURN=17 ERROR="IPv6 address has too many segments"
-                    ;;
-                    4)
-                        RETURN=18 ERROR="invalid IPv6: empty segment requires double colon (::) compression"
-                    ;;
-                    *)
-                        RETURN=19 ERROR="invalid IPv6 hextet: segment exceeds 4 hex digits or is malformed"
-                    ;;
+                    1) return 15 ;;
+                    2) return 16 ;;
+                    3) return 17 ;;
+                    4) return 18 ;;
+                    *) return 19 ;;
                 esac
-                IPV6=""
-                return $RETURN
-            }
             IPV6="$HOST"
             FAMILY="inet6"
         ;;
