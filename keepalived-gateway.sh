@@ -521,7 +521,7 @@ set_variables ()
     is_digit "${METRIC:=0}" && {
         METRIC="${METRIC#"${METRIC%%[!0]*}"}"
         DEFAULT_METRIC="${METRIC:-}"
-    } || say 2 "error: variable 'METRIC': invalid route metric: '$METRIC'"
+    } || say 2 "error: variable 'METRIC': invalid route metric"
 
     is_not_empty "${GATEWAYS:-}" ||
         say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
@@ -529,7 +529,7 @@ set_variables ()
     parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:=30}" && {
         CHECK_INTERVAL="$INTERVAL"
         HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
-    } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
+    } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y]"
 
 
     is_empty "${PING_HOST:-}" || {
@@ -537,7 +537,7 @@ set_variables ()
             PING_HOST="${FQDN:-}"
             PING_IPV4="${IPV4:-}"
             PING_IPV6="${IPV6:-}"
-        } || say 2 "error: variable 'PING_HOST': $ERROR: '$PING_HOST'"
+        } || say 2 "error: variable 'PING_HOST': $ERROR"
     }
 
     case "${SPEEDTEST:-}" in
@@ -548,7 +548,7 @@ set_variables ()
             SPEEDTEST=yes
         ;;
         *)
-            say 2 "error: variable 'SPEEDTEST': must be 'yes|no', but got: '$SPEEDTEST'"
+            say 2 "error: variable 'SPEEDTEST': must be 'yes|no'"
         ;;
     esac
 
@@ -556,7 +556,7 @@ set_variables ()
         "")
         ;;
         *[\'\"\;\|\<\>\`\$]*)
-            say 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters: '$SPEEDTEST_SCOPE'"
+            say 2 "error: variable 'SPEEDTEST_SCOPE': contains illegal shell characters"
         ;;
         /*)
             SPEEDTEST_SCOPE="${SPEEDTEST_SCOPE#/}"
@@ -574,14 +574,14 @@ set_variables ()
             RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
             SPEEDTEST_SCHEME="${SCHEME:-http}"
             SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
-        } || say 2 "error: variable 'SPEEDTEST_HOST': $ERROR: '$SPEEDTEST_HOST'"
+        } || say 2 "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
 
     case "${ROLE:=single}" in
         cluster | master | master-advisor | single | slave)
         ;;
         *)
-            say 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave', but got: '$ROLE'"
+            say 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave'"
         ;;
     esac
 
@@ -590,13 +590,13 @@ set_variables ()
             say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || {
         parse_resource "$VIRTUAL_IPADDRESS" ||
-            say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
         is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
-            say 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed"
 
         is_not_empty "${IPV4:-"${IPV6:-}"}" ||
-            say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address"
 
         VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
         VIRTUAL_IPADDRESS_FAMILY="${FAMILY:-}"
@@ -606,7 +606,7 @@ set_variables ()
         is_equal "$ROLE" "single" ||
             say 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || is_digit "$VIRTUAL_PORT" ||
-            say 2 "error: variable 'VIRTUAL_PORT': invalid port number: '$VIRTUAL_PORT'"
+            say 2 "error: variable 'VIRTUAL_PORT': invalid port number"
 }
 
 check_base_dependencies ()
