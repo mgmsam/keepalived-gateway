@@ -129,7 +129,7 @@ say ()
         esac
         shift
     done
-    is_empty "$*" || puts "${LOG_PREFIX:+$LOG_PREFIX: }${1:+$*}"
+    is_empty "$*" || puts "${LOG_PREFIX:-$0: }${1:+$*}"
 }
 
 die ()
@@ -143,6 +143,9 @@ eval 'ERROR=$(:)' 2>/dev/null ||
 
 eval 'ERROR=$((0))' 2>/dev/null ||
     die "error: POSIX arithmetic expansion \$((...)) is not supported by this shell."
+
+eval 'ERROR=${ERROR#*:}' 2>/dev/null ||
+    die "error: POSIX parameter expansion \${VAR#*}, \${VAR%*}, ... is not supported by this shell."
 
 is_digit ()
 {
@@ -171,7 +174,7 @@ is_term ()
 set_state ()
 {
     STATE="$1"
-    LOG_PREFIX="kg [$1]"
+    LOG_PREFIX="kg [$1]: "
 }
 
 setup_core_env ()
@@ -195,10 +198,13 @@ include_config ()
     CONFIG_FILE="/etc/keepalived-gateway.conf"
     if is_file "$CONFIG_FILE"
     then
-        . "$CONFIG_FILE" || EXIT_CODE=$?
+        ERROR="$(. "$CONFIG_FILE" 2>&1)" && . "$CONFIG_FILE" || {
+            EXIT_CODE=$?
+            say "${ERROR#*:}"
+        }
     else
-        say "error: no such config file: '$CONFIG_FILE'"
         EXIT_CODE=$?
+        say "error: no such config file: '$CONFIG_FILE'"
     fi
     return $EXIT_CODE
 }
