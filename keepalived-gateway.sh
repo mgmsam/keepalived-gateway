@@ -77,25 +77,53 @@ is_term ()
 
 if is_not_empty "${KSH_VERSION:-}"
 then
-    PUTS=print
+    PUTS_TYPE="print" CAN_ESC_OCTAL="yes"
     puts ()
     {
-        print "${PUTS_OPTIONS:--r}" -- "$*"
+        is_empty "${USE_ESC:-}" && print ${CONTINUE:+"$CONTINUE"} -r -- "$*" ||
+                                   print ${CONTINUE:+"$CONTINUE"}    -- "$*"
     }
 else
     if type printf >/dev/null 2>&1
     then
-        PUTS=printf
+        printf '%b' '\033[0m' >/dev/null 2>&1 && CAN_ESC_OCTAL="yes" ||
+                                                 CAN_ESC_OCTAL=""
+        PUTS_TYPE="printf"
         puts ()
         {
-            printf "${PUTS_OPTIONS:-%s\n}" "$*"
+            is_empty "${USE_ESC:-}"  && FORMAT="%s" ||
+                                        FORMAT="${CAN_ESC_OCTAL:+%b}"
+            is_empty "${CONTINUE:-}" && printf "${FORMAT:-%s}\n" "$*" ||
+                                        printf "${FORMAT:-%s}"   "$*"
         }
     elif type echo >/dev/null 2>&1
     then
-        PUTS=echo
-        puts ()
-        {
-            echo "${PUTS_OPTIONS:-}" "$*"
+        is_equal "X`echo -n`" "X-n" && {
+            is_equal "X`echo '\033[0m'`" "X\033[0m" && CAN_ESC_OCTAL="" ||
+                                                       CAN_ESC_OCTAL="yes"
+            PUTS_TYPE="echo"
+            puts ()
+            {
+                echo "$*${CONTINUE:+\c}"
+            }
+        } || {
+            is_equal "X`echo -e`" "X-e" && {
+                is_equal "X`echo '\033[0m'`" "X\033[0m" && CAN_ESC_OCTAL="" ||
+                                                           CAN_ESC_OCTAL="yes"
+                PUTS_TYPE="echo_n"
+                puts ()
+                {
+                    echo ${CONTINUE:+"$CONTINUE"} "$*"
+                }
+            } || {
+                PUTS_TYPE="echo_ne" CAN_ESC_OCTAL="yes"
+                puts ()
+                {
+                    is_empty "${USE_ESC:-}" &&
+                        echo    ${CONTINUE:+"$CONTINUE"} "$*" ||
+                        echo -e ${CONTINUE:+"$CONTINUE"} "$*"
+                }
+            }
         }
     else
         exit 1
@@ -105,16 +133,18 @@ fi
 say ()
 {
     EXIT_CODE=$?
-    PUTS_OPTIONS=""
+    CONTINUE=""
+    USE_ESC="yes"
     while is_diff $# 0
     do
         case "${1:-}" in
-            -n)
-                is_equal "$PUTS" printf &&
-                    PUTS_OPTIONS=%s ||
-                    PUTS_OPTIONS=-n
+            -r)
+                USE_ESC=""
             ;;
-            *[!0123456789]* | "")
+            -n)
+                CONTINUE="-n"
+            ;;
+            "" | *[!0123456789]*)
                 break
             ;;
             *)
@@ -123,10 +153,7 @@ say ()
         esac
         shift
     done
-    is_empty "$*" || {
-        puts "${LOG_PREFIX:="${0##*/}"}:${1:+" $*"}"
-        PUTS_OPTIONS=
-    }
+    is_empty "$*" || puts "${LOG_PREFIX:+$LOG_PREFIX: }${1:+$*}"
 }
 
 die ()
@@ -143,10 +170,15 @@ set_state ()
 
 setup_core_env ()
 {
+    is_not_empty "${CAN_ESC_OCTAL:-}" || is_equal "$PUTS_TYPE" "printf" ||
+        die 1 "error: shell environment does not support escape sequences"
+
+    CONTINUE="-n"
+    USE_ESC="${CAN_ESC_OCTAL:-}"
     LF="
 "
-    CR="$(printf "\r")"
-    TAB="$(printf "\t")"
+    CR="$(puts "\r")"
+    TAB="$(puts "\t")"
     SPACE=" "
     POSIX_IFS="$SPACE$TAB$LF"
     IFS="$POSIX_IFS"
