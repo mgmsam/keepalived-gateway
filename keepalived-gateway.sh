@@ -247,6 +247,22 @@ is_metric ()
     esac
 }
 
+is_port ()
+{
+    case "${1:-}" in
+        "" | *[!0123456789]*)
+            ERROR="port is not a valid number"
+            return 1
+        ;;
+        *)
+            test "$1" -gt 0 && test "$1" -le 65535 || {
+                ERROR="port must be in range 1-65535"
+                return 2
+            }
+        ;;
+    esac
+}
+
 is_ipv4 ()
 {
     IFS="."
@@ -441,10 +457,19 @@ parse_resource ()
             HOST="$AUTHORITY"
         ;;
     esac
+    is_empty "${PORT:-}" || is_port "$PORT" ||
+        case $? in
+            1)
+                return 8
+            ;;
+            *)
+                return 9
+            ;;
+        esac
     case "${HOST:-}" in
         "" | *[!0-9a-zA-Z.:_-]*)
             ERROR="host contains illegal characters or is empty"
-            return 8
+            return 10
         ;;
         *[!0-9a-fA-F:]*)
             case "$HOST" in
@@ -452,11 +477,11 @@ parse_resource ()
                     case "$HOST" in
                         -*)
                             ERROR="domain name cannot start with a hyphen"
-                            return 9
+                            return 11
                         ;;
                         *..*)
                             ERROR="domain name contains empty labels (double dots)"
-                            return 10
+                            return 12
                         ;;
                     esac
                     FQDN="$HOST"
@@ -464,14 +489,14 @@ parse_resource ()
                 *.*.*.*)
                     is_ipv4 "$HOST" || {
                         ERROR="invalid IPv4 address format"
-                        return 11
+                        return 13
                     }
                     IPV4="$HOST"
                     FAMILY="inet"
                 ;;
                 *)
                     ERROR="unrecognized host format (missing letters or invalid IPv4)"
-                    return 12
+                    return 14
                 ;;
             esac
         ;;
@@ -479,19 +504,19 @@ parse_resource ()
             is_ipv6 "$HOST" || {
                 case $? in
                     1)
-                        RETURN=13 ERROR="IPv6 contains multiple zero compressions (::)"
+                        RETURN=15 ERROR="IPv6 contains multiple zero compressions (::)"
                     ;;
                     2)
-                        RETURN=14 ERROR="invalid IPv6: address must contain at least one colon"
+                        RETURN=16 ERROR="invalid IPv6: address must contain at least one colon"
                     ;;
                     3)
-                        RETURN=15 ERROR="IPv6 address has too many segments"
+                        RETURN=17 ERROR="IPv6 address has too many segments"
                     ;;
                     4)
-                        RETURN=16 ERROR="invalid IPv6: empty segment requires double colon (::) compression"
+                        RETURN=18 ERROR="invalid IPv6: empty segment requires double colon (::) compression"
                     ;;
                     *)
-                        RETURN=17 ERROR="invalid IPv6 hextet: segment exceeds 4 hex digits or is malformed"
+                        RETURN=19 ERROR="invalid IPv6 hextet: segment exceeds 4 hex digits or is malformed"
                     ;;
                 esac
                 IPV6=""
@@ -502,14 +527,14 @@ parse_resource ()
         ;;
         *:*)
             ERROR="invalid port separator or malformed IPv6"
-            return 18
+            return 20
         ;;
         *[!0-9]*)
             FQDN="$HOST"
         ;;
         *)
             ERROR="numeric-only hostnames are not allowed to avoid IP collision"
-            return 19
+            return 21
         ;;
     esac
 }
@@ -645,8 +670,8 @@ set_variables ()
     is_empty "${VIRTUAL_PORT:-}" && {
         is_equal "$ROLE" "single" ||
             say 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
-    } || is_digit "$VIRTUAL_PORT" ||
-            say 2 "error: variable 'VIRTUAL_PORT': invalid port number"
+    } || is_port "$VIRTUAL_PORT" ||
+            say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
 }
 
 check_base_dependencies ()
