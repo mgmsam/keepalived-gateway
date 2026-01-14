@@ -215,13 +215,65 @@ is_ipv4 ()
     set -- $1
     IFS="$POSIX_IFS"
     is_equal $# 4 || return 1
-    for OCTET
+    for i
     do
-        case "$OCTET" in
+        case "$i" in
             [0-9] | [0-9][0-9] | 1[0-9][0-9] | 2[0-4][0-9] | 25[0-5])
             ;;
             *)
                 return 1
+            ;;
+        esac
+    done
+}
+
+is_ipv6 ()
+{
+    case "${1:-}" in
+        *[!0-9a-fA-F:]* | *::*::*)
+            return 1
+        ;;
+        *:*)
+        ;;
+        *)
+            return 2
+        ;;
+    esac
+    case "$1" in
+        :*)
+            set -- "0$1"
+        ;;
+    esac
+    case "$1" in
+        *:)
+            set -- "${1}0"
+        ;;
+    esac
+    case "$1" in
+        *:*:*:*:*:*:*:*:*)
+            return 3
+        ;;
+    esac
+    IPV6="$1"
+    IFS=":"
+    set -- $1
+    IFS="$POSIX_IFS"
+    for i
+    do
+        case "$i" in
+            "")
+                case "$IPV6" in
+                    *::*)
+                    ;;
+                    *)
+                        return 4
+                    ;;
+                esac
+            ;;
+            [0-9a-fA-F] | [0-9a-fA-F][0-9a-fA-F] | [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] | [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+            ;;
+            *)
+                return 5
             ;;
         esac
     done
@@ -386,31 +438,40 @@ parse_resource ()
             esac
         ;;
         *:*:*)
-            case "$HOST" in
-                *:*:*:*:*:*:*:*:*)
-                    ERROR="IPv6 address has too many segments"
-                    return 13
-                ;;
-                *[!:]*)
-                    IPV6="$HOST"
-                    FAMILY="inet6"
-                ;;
-                *)
-                    ERROR="invalid IPv6 format (empty address)"
-                    return 14
-                ;;
-            esac
+            is_ipv6 "$HOST" || {
+                case $? in
+                    1)
+                        RETURN=13 ERROR="IPv6 contains multiple zero compressions (::)"
+                    ;;
+                    2)
+                        RETURN=14 ERROR="invalid IPv6: address must contain at least one colon"
+                    ;;
+                    3)
+                        RETURN=15 ERROR="IPv6 address has too many segments"
+                    ;;
+                    4)
+                        RETURN=16 ERROR="invalid IPv6: empty segment requires double colon (::) compression"
+                    ;;
+                    *)
+                        RETURN=17 ERROR="invalid IPv6 hextet: segment exceeds 4 hex digits or is malformed"
+                    ;;
+                esac
+                IPV6=""
+                return $RETURN
+            }
+            IPV6="$HOST"
+            FAMILY="inet6"
         ;;
         *:*)
             ERROR="invalid port separator or malformed IPv6"
-            return 15
+            return 18
         ;;
         *[!0-9]*)
             FQDN="$HOST"
         ;;
         *)
             ERROR="numeric-only hostnames are not allowed to avoid IP collision"
-            return 16
+            return 19
         ;;
     esac
 }
