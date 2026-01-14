@@ -51,30 +51,6 @@ is_not_empty ()
     esac
 }
 
-is_digit ()
-{
-    case "${1:-}" in
-        *[!0123456789]*)
-            return 1
-    esac
-}
-
-is_dir ()
-{
-    test -d "${1:-}"
-}
-
-is_file ()
-{
-    test -f "${1:-}"
-}
-
-is_term ()
-{
-    test -t "${1:-1}" && IS_TERM=0 || IS_TERM=1
-    return "$IS_TERM"
-}
-
 if is_not_empty "${KSH_VERSION:-}"
 then
     PUTS_TYPE="print" CAN_ESC_OCTAL="yes"
@@ -160,6 +136,36 @@ die ()
 {
     say "$@" >&2
     exit "$EXIT_CODE"
+}
+
+eval 'ERROR=$(:)' 2>/dev/null ||
+    die "error: POSIX command substitution \$(...) is not supported by this shell."
+
+eval 'ERROR=$((0))' 2>/dev/null ||
+    die "error: POSIX arithmetic expansion \$((...)) is not supported by this shell."
+
+is_digit ()
+{
+    case "${1:-}" in
+        *[!0123456789]*)
+            return 1
+    esac
+}
+
+is_dir ()
+{
+    test -d "${1:-}"
+}
+
+is_file ()
+{
+    test -f "${1:-}"
+}
+
+is_term ()
+{
+    test -t "${1:-1}" && IS_TERM=0 || IS_TERM=1
+    return "$IS_TERM"
 }
 
 set_state ()
