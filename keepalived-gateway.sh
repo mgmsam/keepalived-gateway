@@ -522,16 +522,17 @@ set_variables ()
         is_equal "$ROLE" "single" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || {
-        parse_resource "$VIRTUAL_IPADDRESS" && {
-            VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
-            VIRTUAL_IPADDRESS_FAMILY="$FAMILY"
-        } || say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
+        parse_resource "$VIRTUAL_IPADDRESS" ||
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: '$VIRTUAL_IPADDRESS'"
 
         is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed: '$VIRTUAL_IPADDRESS'"
 
         is_not_empty "${IPV4:-"${IPV6:-}"}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address: '$VIRTUAL_IPADDRESS'"
+
+        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
+        VIRTUAL_IPADDRESS_FAMILY="${FAMILY:-}"
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
@@ -1144,7 +1145,7 @@ detect_sync_transport ()
         die "error: no supported sync client found (wget/curl/nc required)"
 }
 
-set_variables ()
+deprecated_set_variables ()
 {
             case "${DOWNLOAD_CMD:-}" in
                 "")
