@@ -211,7 +211,7 @@ include_config ()
 
 is_interface ()
 {
-    case "$1" in
+    case "${1:-}" in
         "" | *[!0-9a-zA-Z:._-]*)
             ERROR="contains invalid characters"
             return 1
@@ -227,6 +227,22 @@ is_interface ()
         ????????????????*)
             ERROR="name too long (max 15)"
             return 4
+        ;;
+    esac
+}
+
+is_metric ()
+{
+    case "${1:-}" in
+        "" | *[!0123456789]*)
+            ERROR="route metric is not a valid number"
+            return 1
+        ;;
+        *)
+            test "$1" -le 4294967295 || {
+                ERROR="route metric exceeds 32-bit limit"
+                return 2
+            }
         ;;
     esac
 }
@@ -543,10 +559,10 @@ set_variables ()
             say 2 "error: variable 'INTERFACE': $ERROR"
     }
 
-    is_digit "${METRIC:=0}" && {
+    is_metric "${METRIC:=0}" || {
         METRIC="${METRIC#"${METRIC%%[!0]*}"}"
         DEFAULT_METRIC="${METRIC:-}"
-    } || say 2 "error: variable 'METRIC': invalid route metric"
+    } || say 2 "error: variable 'METRIC': $ERROR"
 
     is_not_empty "${GATEWAYS:-}" ||
         say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
