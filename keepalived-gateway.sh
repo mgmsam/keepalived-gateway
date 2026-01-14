@@ -459,7 +459,7 @@ set_variables ()
     is_not_empty "${GATEWAYS:-}" ||
         say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
 
-    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:-30}" && {
+    parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:=30}" && {
         CHECK_INTERVAL="$INTERVAL"
         HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
     } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y], but got: '$CHECK_INTERVAL'"
