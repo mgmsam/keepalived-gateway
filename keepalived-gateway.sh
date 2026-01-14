@@ -209,6 +209,28 @@ include_config ()
     return $EXIT_CODE
 }
 
+is_interface ()
+{
+    case "$1" in
+        "" | *[!0-9a-zA-Z:._-]*)
+            ERROR="contains invalid characters"
+            return 1
+        ;;
+        *:*)
+            ERROR="interface aliases are not supported, use physical device name"
+            return 2
+        ;;
+        .*)
+            ERROR="name cannot start with a dot"
+            return 3
+        ;;
+        ????????????????*)
+            ERROR="name too long (max 15)"
+            return 4
+        ;;
+    esac
+}
+
 is_ipv4 ()
 {
     IFS="."
@@ -516,7 +538,10 @@ format_duration ()
 
 set_variables ()
 {
-    DEFAULT_INTERFACE="${INTERFACE:-}"
+    is_empty "${INTERFACE:-}" || {
+        is_interface "$INTERFACE" && DEFAULT_INTERFACE="$INTERFACE" ||
+            say 2 "error: variable 'INTERFACE': $ERROR"
+    }
 
     is_digit "${METRIC:=0}" && {
         METRIC="${METRIC#"${METRIC%%[!0]*}"}"
@@ -530,7 +555,6 @@ set_variables ()
         CHECK_INTERVAL="$INTERVAL"
         HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
     } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y]"
-
 
     is_empty "${PING_HOST:-}" || {
         parse_resource "$PING_HOST" && {
@@ -1124,7 +1148,7 @@ deprecated_set_variables ()
     # GATEWAYS_STATE_FILE="/tmp/kg/gateways.state"
 }
 
-is_interface ()
+is_local_interface ()
 {
     ip link show ${1:-} >/dev/null 2>&1
 }
