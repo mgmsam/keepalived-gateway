@@ -212,21 +212,25 @@ include_config ()
 is_interface ()
 {
     case "${1:-}" in
-        "" | *[!0-9a-zA-Z:._-]*)
-            ERROR="contains invalid characters"
+        "")
+            ERROR="is empty"
             return 1
         ;;
-        *:*)
-            ERROR="interface aliases are not supported, use physical device name"
+        *[!0-9a-zA-Z:._-]*)
+            ERROR="contains invalid characters"
             return 2
+        ;;
+        *:*)
+            ERROR="aliases are not supported, use physical device name"
+            return 3
         ;;
         .*)
             ERROR="name cannot start with a dot"
-            return 3
+            return 4
         ;;
         ????????????????*)
             ERROR="name too long (max 15)"
-            return 4
+            return 5
         ;;
     esac
 }
@@ -234,30 +238,18 @@ is_interface ()
 is_metric ()
 {
     case "${1:-}" in
-        "" | *[!0123456789]*)
-            ERROR="route metric is not a valid number"
+        "")
+            ERROR="is empty"
             return 1
+        ;;
+        *[!0123456789]*)
+            ERROR="is not a valid number"
+            return 2
         ;;
         *)
             test "$1" -le 4294967295 || {
-                ERROR="route metric exceeds 32-bit limit"
-                return 2
-            }
-        ;;
-    esac
-}
-
-is_port ()
-{
-    case "${1:-}" in
-        "" | *[!0123456789]*)
-            ERROR="port is not a valid number"
-            return 1
-        ;;
-        *)
-            test "$1" -gt 0 && test "$1" -le 65535 || {
-                ERROR="port must be in range 1-65535"
-                return 2
+                ERROR="exceeds 32-bit limit"
+                return 3
             }
         ;;
     esac
@@ -340,6 +332,199 @@ is_ipv6 ()
             ;;
         esac
     done
+}
+
+parse_gateway_entry ()
+{
+    IFS="@#="
+    set -- $GATEWAY
+    IFS="$POSIX_IFS"
+
+    case "${1:-}" in
+        *[.:]*)
+            INTERFACE=
+            GATEWAY="$1"
+            METRIC="${2:-}"
+        ;;
+        *)
+            INTERFACE="${1:-}"
+            GATEWAY="${2:-}"
+            METRIC="${3:-}"
+        ;;
+    esac
+
+    case "$GATEWAY" in
+        "")
+            say 2 "error: variable 'GATEWAYS': gateway [$NUM]: gateway is empty"
+        ;;
+        *.*)
+            is_ipv4 "$GATEWAY" && FAMILY="inet" ||
+                say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
+        ;;
+        *)
+            GATEWAY="${GATEWAY#[}"
+            GATEWAY="${GATEWAY%]}"
+            is_ipv6 "$GATEWAY" && FAMILY="inet6" ||
+                say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
+        ;;
+    esac
+
+    is_empty "${INTERFACE:-}" && {
+        is_not_empty "${DEFAULT_INTERFACE:-}" &&
+            INTERFACE="$DEFAULT_INTERFACE" ||
+                say 2 "error: variable 'GATEWAYS': gateway [$NUM]: missing interface for gateway"
+    } || {
+        is_interface "$INTERFACE" ||
+            say 2 "error: variable 'GATEWAYS': gateway [$NUM]: interface $ERROR"
+    }
+
+    is_empty "${METRIC:-}" && {
+        is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
+    } || {
+        is_metric "$METRIC" && METRIC="${METRIC#${METRIC%%[!0]*}}" ||
+            say 2 "error: variable 'GATEWAYS': gateway [$NUM]: route metric $ERROR"
+    }
+}
+
+collect_gateway_ipv4 ()
+{
+    GATEWAYS_IPV4="${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}$INTERFACE=$GATEWAY${METRIC:+=$METRIC}"
+}
+
+collect_gateway_ipv6 ()
+{
+    GATEWAYS_IPV6="${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}$INTERFACE=$GATEWAY${METRIC:+=$METRIC}"
+}
+
+collect_metrics_ipv4 ()
+{
+    case " ${METRICS_IPV4:-} " in
+        *" ${METRIC:-0} "*)
+        ;;
+        *)
+            METRICS_IPV4="${METRICS_IPV4:+$METRICS_IPV4 }${METRIC:-0}"
+        ;;
+    esac
+}
+
+collect_metrics_ipv6 ()
+{
+    case " ${METRICS_IPV6:-} " in
+        *" ${METRIC:-0} "*)
+        ;;
+        *)
+            METRICS_IPV6="${METRICS_IPV6:+$METRICS_IPV6 }${METRIC:-0}"
+        ;;
+    esac
+}
+
+collect_interface ()
+{
+    case " ${IFACES:-} " in
+        *" $INTERFACE "*)
+        ;;
+        *)
+            IFACES="${IFACES:+$IFACES }$INTERFACE"
+        ;;
+    esac
+}
+
+count_metrics ()
+{
+    set -- $1
+    puts $#
+}
+
+parse_gateway ()
+{
+    IFACES=""
+    GATEWAYS_IPV4=""
+    GATEWAYS_IPV6=""
+    METRICS_IPV4=""
+    METRICS_IPV6=""
+
+    IFS="$IFS,"
+    set -- $GATEWAYS
+    IFS="$POSIX_IFS"
+
+    NUM=0
+    for GATEWAY
+    do
+        NUM=$((NUM + 1))
+        parse_gateway_entry
+        case "$FAMILY" in
+            inet)
+                collect_gateway_ipv4
+                collect_metrics_ipv4
+            ;;
+            inet6)
+                collect_gateway_ipv6
+                collect_metrics_ipv6
+            ;;
+        esac
+        is_empty "${INTERFACE:-}" || collect_interface
+    done
+
+    GATEWAYS_IPV4="$(optimize_gateways "${GATEWAYS_IPV4:-}")"
+    GATEWAYS_IPV6="$(optimize_gateways "${GATEWAYS_IPV6:-}")"
+    TOTAL_METRICS_IPV4="$(count_metrics "${METRICS_IPV4:-}")"
+    TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
+}
+
+deprecated_parse_gateway ()
+{
+    case "$FAMILY" in
+        inet)
+            PROTO="IPv4"
+            is_not_empty "${PING4:-}" && {
+
+                is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" || {
+                    say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$PING_HOST' ($PROTO)"
+                    say "WARNING: gateway '$GATEWAY': skipping internet check (direct IP check only)"
+                }
+
+                is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" || {
+                    say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$SPEEDTEST_HOST' ($PROTO)"
+                    say "WARNING: gateway '$GATEWAY': skipping speedtest check for this gateway"
+                }
+            }
+        ;;
+        inet6)
+            PROTO="IPv6"
+            is_not_empty "${PING6:-}" && {
+
+                is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" || {
+                    say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$PING_HOST' ($PROTO)"
+                    say "WARNING: gateway '$GATEWAY': skipping internet check (direct IP check only)"
+                }
+
+                is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" || {
+                    say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$SPEEDTEST_HOST' ($PROTO)"
+                    say "WARNING: gateway '$GATEWAY': skipping speedtest check for this gateway"
+                }
+            }
+        ;;
+    esac || {
+        say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
+        RETURN=2
+        continue
+    }
+}
+
+is_port ()
+{
+    case "${1:-}" in
+        "" | *[!0123456789]*)
+            ERROR="port is not a valid number"
+            return 1
+        ;;
+        *)
+            test "$1" -gt 0 && test "$1" -le 65535 || {
+                ERROR="port must be in range 1-65535"
+                return 2
+            }
+        ;;
+    esac
 }
 
 parse_resource ()
@@ -573,13 +758,24 @@ set_variables ()
             say 2 "error: variable 'INTERFACE': $ERROR"
     }
 
-    is_metric "${METRIC:=0}" || {
+    is_metric "${METRIC:=0}" && {
         METRIC="${METRIC#"${METRIC%%[!0]*}"}"
         DEFAULT_METRIC="${METRIC:-}"
-    } || say 2 "error: variable 'METRIC': $ERROR"
+    } || say 2 "error: variable 'METRIC': route metric $ERROR"
 
-    is_not_empty "${GATEWAYS:-}" ||
-        say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+    is_not_empty "${GATEWAYS:-}" && {
+        case "${GATEWAYS:-}" in
+            *[!][[:blank:]a-zA-Z0-9.:_=,-]*)
+                say 2 "error: variable 'GATEWAYS': contains forbidden characters"
+            ;;
+            *[![:blank:],]*)
+                parse_gateway
+            ;;
+            *)
+                say 2 "error: variable 'GATEWAYS': no valid gateways found"
+            ;;
+        esac
+    } || say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
 
     parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:=30}" && {
         CHECK_INTERVAL="$INTERVAL"
@@ -773,57 +969,6 @@ resolve_ips ()
         ' /etc/hosts)
 }
 
-parse_gateway_entry ()
-{
-    IFS="@#="
-    set -- $GATEWAY
-    IFS="$POSIX_IFS"
-
-    case "${1:-}" in
-        *[.:]*)
-            INTERFACE=
-            GATEWAY="$1"
-            METRIC="${2:-}"
-        ;;
-        *)
-            INTERFACE="${1:-}"
-            GATEWAY="${2:-}"
-            METRIC="${3:-}"
-        ;;
-    esac
-
-    is_not_empty "${GATEWAY:-}" && {
-        GATEWAY="${GATEWAY#[}"
-        GATEWAY="${GATEWAY%]}"
-    } && is_valid_ip "${GATEWAY:-}" || {
-        ERROR="gateway is not a valid IP address: '${GATEWAY:-}'"
-        return 1
-    }
-
-    case "${INTERFACE:-}" in
-        "")
-            is_not_empty "${DEFAULT_INTERFACE:-}" || {
-                ERROR="missing interface for gateway: '$GATEWAY'"
-                return 1
-            }
-            INTERFACE="$DEFAULT_INTERFACE"
-        ;;
-    esac
-
-    case "${METRIC:-}" in
-        "")
-            is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
-        ;;
-        *[!0123456789]*)
-            ERROR="invalid route metric for gateway '$INTERFACE=$GATEWAY': '$METRIC'"
-            return 1
-        ;;
-        0*)
-            METRIC="${METRIC#"${METRIC%%[!0]*}"}"
-        ;;
-    esac
-}
-
 get_local_ip ()
 {
     case "${1:-}" in
@@ -874,39 +1019,6 @@ is_local_ip ()
     '
 }
 
-collect_interface ()
-{
-    case " ${IFACES:-} " in
-        *" $INTERFACE "*)
-        ;;
-        *)
-            IFACES="${IFACES:+"$IFACES "}$INTERFACE"
-        ;;
-    esac
-}
-
-collect_metrics_ipv4 ()
-{
-    case " ${METRICS_IPV4:-} " in
-        *" ${METRIC:-0} "*)
-        ;;
-        *)
-            METRICS_IPV4="${METRICS_IPV4:+"$METRICS_IPV4 "}${METRIC:-0}"
-        ;;
-    esac
-}
-
-collect_metrics_ipv6 ()
-{
-    case " ${METRICS_IPV6:-} " in
-        *" ${METRIC:-0} "*)
-        ;;
-        *)
-            METRICS_IPV6="${METRICS_IPV6:+"$METRICS_IPV6 "}${METRIC:-0}"
-        ;;
-    esac
-}
-
 optimize_gateways ()
 {
     awk '
@@ -950,87 +1062,6 @@ optimize_gateways ()
     ' <<EOF
 $1
 EOF
-}
-
-count_metrics ()
-{
-    set -- $1
-    puts $#
-}
-
-parse_gateway ()
-{
-    IFACES=""
-    GATEWAYS_IPV4=""
-    GATEWAYS_IPV6=""
-    METRICS_IPV4=""
-    METRICS_IPV6=""
-    RETURN=0
-    for GATEWAY
-    do
-        parse_gateway_entry || {
-            say "error: variable 'GATEWAYS': $ERROR"
-            RETURN=2
-            continue
-        }
-
-        if is_local_ip "$GATEWAY" "$FAMILY"
-        then
-            say "error: variable 'GATEWAYS': gateway is a local address on this host: '$GATEWAY'"
-            RETURN=2
-            continue
-        fi
-
-        case "$FAMILY" in
-            inet)
-                PROTO="IPv4"
-                is_not_empty "${PING4:-}" && {
-
-                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" || {
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$PING_HOST' ($PROTO)"
-                        say "WARNING: gateway '$GATEWAY': skipping internet check (direct IP check only)"
-                    }
-
-                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" || {
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$SPEEDTEST_HOST' ($PROTO)"
-                        say "WARNING: gateway '$GATEWAY': skipping speedtest check for this gateway"
-                    }
-
-                    collect_metrics_ipv4
-                    GATEWAYS_IPV4="${GATEWAYS_IPV4:+"$GATEWAYS_IPV4$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
-                }
-            ;;
-            inet6)
-                PROTO="IPv6"
-                is_not_empty "${PING6:-}" && {
-
-                    is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" || {
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$PING_HOST' ($PROTO)"
-                        say "WARNING: gateway '$GATEWAY': skipping internet check (direct IP check only)"
-                    }
-
-                    is_equal "$SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" || {
-                        say "WARNING: variable 'GATEWAYS': gateway '$GATEWAY': failed to resolve '$SPEEDTEST_HOST' ($PROTO)"
-                        say "WARNING: gateway '$GATEWAY': skipping speedtest check for this gateway"
-                    }
-
-                    collect_metrics_ipv6
-                    GATEWAYS_IPV6="${GATEWAYS_IPV6:+"$GATEWAYS_IPV6$LF"}$INTERFACE=$GATEWAY${METRIC:+"=$METRIC"}"
-                }
-            ;;
-        esac || {
-            say "error: variable 'GATEWAYS': gateway '$GATEWAY' requires '$PROTO', but your system ping does not support: '$PROTO'"
-            RETURN=2
-            continue
-        }
-
-        collect_interface
-    done >&2
-    is_equal "$RETURN" 0 || die "$RETURN"
-    GATEWAYS_IPV4="$(optimize_gateways "${GATEWAYS_IPV4:-}")"
-    GATEWAYS_IPV6="$(optimize_gateways "${GATEWAYS_IPV6:-}")"
-    TOTAL_METRICS_IPV4="$(count_metrics "${METRICS_IPV4:-}")"
-    TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
 }
 
 deprecated_set_variables ()
