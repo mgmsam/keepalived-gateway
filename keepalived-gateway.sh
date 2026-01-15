@@ -429,6 +429,51 @@ collect_interface ()
     esac
 }
 
+optimize_gateways ()
+{
+    awk '
+        BEGIN {
+            FS = "="
+        }
+
+        {
+            interface = $1
+            gateway = $2
+            metric = ($3 == "" ? 0 : $3)
+            key = interface "=" gateway
+
+            if (!(key in best_metric) || metric < best_metric[key]) {
+                best_metric[key] = metric
+                pos[key] = $0
+            }
+
+            if (!(key in seen)) {
+                keys[++count] = key
+                seen[key] = 1
+            }
+        }
+
+        END {
+            for (i = 2; i <= count; i++) {
+                for (j = i; j > 1 && best_metric[keys[j-1]] > best_metric[keys[j]]; j--) {
+                    tmp = keys[j]
+                    keys[j] = keys[j-1]
+                    keys[j-1] = tmp
+                }
+            }
+
+            gateways = ""
+            for (i = 1; i <= count; i++) {
+                gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
+            }
+
+            if (gateways != "") print gateways
+        }
+    ' <<EOF
+$1
+EOF
+}
+
 count_metrics ()
 {
     set -- $1
@@ -784,7 +829,7 @@ set_variables ()
 
     is_empty "${PING_HOST:-}" || {
         parse_resource "$PING_HOST" && {
-            PING_HOST="${FQDN:-}"
+            PING_FQDN="${FQDN:-}"
             PING_IPV4="${IPV4:-}"
             PING_IPV6="${IPV6:-}"
         } || say 2 "error: variable 'PING_HOST': $ERROR"
@@ -799,6 +844,7 @@ set_variables ()
         ;;
         *)
             say 2 "error: variable 'SPEEDTEST': must be 'yes|no'"
+            SPEEDTEST=no
         ;;
     esac
 
@@ -818,7 +864,7 @@ set_variables ()
             say 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
     } || {
         parse_resource "$SPEEDTEST_HOST" && {
-            SPEEDTEST_HOST="${FQDN:-}"
+            SPEEDTEST_FQDN="${FQDN:-}"
             SPEEDTEST_IPV4="${IPV4:-}"
             SPEEDTEST_IPV6="${IPV6:-}"
             RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
@@ -855,118 +901,10 @@ set_variables ()
     is_empty "${VIRTUAL_PORT:-}" && {
         is_equal "$ROLE" "single" ||
             say 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
-    } || is_port "$VIRTUAL_PORT" ||
-            say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
-}
-
-check_base_dependencies ()
-{
-    RETURN=0
-    for COMMAND in awk id ip ping printf sleep timeout
-    do
-        type "$COMMAND" >/dev/null 2>&1 || {
-            say "dependency not found: '$COMMAND'" >&2
-            RETURN="$SAY_RETURN"
-        }
-    done
-    is_equal "$RETURN" 0 || die "$RETURN"
-
-    if ping -4 -c 1 -w 1 127.0.0.1
-    then
-        PING4="ping -4"
-    else
-        PING4="ping"
-    fi >/dev/null 2>&1
-
-    if ping -6 -c 1 -w 1 ::1
-    then
-        PING6="ping -6"
-    elif ping6 -c 1 -w 1 ::1
-    then
-        PING6="ping6"
-    else
-        PING6=""
-    fi >/dev/null 2>&1
-
-    if timeout -t 1 sleep 0
-    then
-        TIMEOUT="timeout -t"
-    else
-        TIMEOUT="timeout"
-    fi >/dev/null 2>&1
-}
-
-check_functional_dependencies ()
-{
-    RETURN=0
-    MISSING_DEPS=""
-
-    is_equal "$SPEEDTEST" "no" || {
-
-        for COMMAND in date wc
-        do
-            type "$COMMAND" >/dev/null 2>&1 || {
-                RETURN=$?
-                MISSING_DEPS="${MISSING_DEPS:+"$MISSING_DEPS|"}$COMMAND"
-            }
-        done
-
-        is_empty "${MISSING_DEPS:-}" ||
-            say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'" >&2
+    } || is_port "$VIRTUAL_PORT" || {
+        say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
+        VIRTUAL_PORT=""
     }
-    is_equal "$RETURN" 0 || die "$RETURN"
-}
-
-check_permissions ()
-{
-    is_equal "$(id -u)" 0 ||
-        say "error: must be run as root to manage routes and interfaces."
-}
-
-resolve_ips ()
-{
-    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
-        /PING/ {
-            split($0, a, /[()]/)
-            print a[2]
-            exit
-        }
-    ')" || :
-
-    is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
-            /PING/ {
-                split($0, a, /[()]/)
-                print a[2]
-                exit
-            }
-        ')" || :
-
-    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
-
-    is_not_empty "${IPV4:-}" ||
-        IPV4=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /\./) {
-                        print $1
-                        exit
-                    }
-                }
-            }
-        ' /etc/hosts)
-
-    is_not_empty "${IPV6:-}" ||
-        IPV6=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /:/) {
-                        print $1
-                        exit
-                    }
-                }
-            }
-        ' /etc/hosts)
 }
 
 get_local_ip ()
@@ -1019,49 +957,175 @@ is_local_ip ()
     '
 }
 
-optimize_gateways ()
+is_remote_ip ()
 {
-    awk '
-        BEGIN {
-            FS = "="
+    :
+}
+
+resolve_ips ()
+{
+    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
+        /PING/ {
+            split($0, a, /[()]/)
+            print a[2]
+            exit
         }
+    ')" || :
 
-        {
-            interface = $1
-            gateway = $2
-            metric = ($3 == "" ? 0 : $3)
-            key = interface "=" gateway
-
-            if (!(key in best_metric) || metric < best_metric[key]) {
-                best_metric[key] = metric
-                pos[key] = $0
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
+            /PING/ {
+                split($0, a, /[()]/)
+                print a[2]
+                exit
             }
+        ')" || :
 
-            if (!(key in seen)) {
-                keys[++count] = key
-                seen[key] = 1
-            }
-        }
+    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
 
-        END {
-            for (i = 2; i <= count; i++) {
-                for (j = i; j > 1 && best_metric[keys[j-1]] > best_metric[keys[j]]; j--) {
-                    tmp = keys[j]
-                    keys[j] = keys[j-1]
-                    keys[j-1] = tmp
+    is_not_empty "${IPV4:-}" ||
+        IPV4=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /\./) {
+                        print $1
+                        exit
+                    }
                 }
             }
+        ' /etc/hosts)
 
-            gateways = ""
-            for (i = 1; i <= count; i++) {
-                gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
+    is_not_empty "${IPV6:-}" ||
+        IPV6=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /:/) {
+                        print $1
+                        exit
+                    }
+                }
             }
+        ' /etc/hosts)
+}
 
-            if (gateways != "") print gateways
+resolve_dependencies ()
+{
+    RETURN=0
+    MISSING_DEPS=""
+
+    is_equal "$SPEEDTEST" "no" || {
+
+        for COMMAND in date wc
+        do
+            type "$COMMAND" >/dev/null 2>&1 ||
+                MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS|}$COMMAND"
+        done
+
+        is_empty "${MISSING_DEPS:-}" ||
+            say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'"
+    }
+
+    is_equal "$RETURN" 0 || die "$RETURN"
+}
+
+verify_gateways_remote ()
+{
+    FAMILY="$1"
+    IFS="="
+    set -- $2
+    IFS="$POSIX_IFS"
+
+    case "${1:-}" in
+        *[.:]*)
+            INTERFACE=
+            GATEWAY="$1"
+            METRIC="${2:-}"
+        ;;
+        *)
+            INTERFACE="$1"
+            GATEWAY="$2"
+            METRIC="${3:-}"
+        ;;
+    esac
+
+    is_remote_ip "$FAMILY" "$GATEWAY" || {
+        ERROR="address is assigned to this host (loopback risk): $GATEWAY"
+        return 2
+    }
+}
+
+verify_network_state ()
+{
+    for GATEWAY in ${GATEWAYS_IPV4:-}
+    do
+        verify_gateway_remote "$GATEWAY" "IPv4" ||
+            say "error: variable 'GATEWAYS': IPv4 $ERROR"
+    done
+
+    for GATEWAY in ${GATEWAYS_IPV6:-}
+    do
+        verify_gateway_remote "$GATEWAY" "IPv6" ||
+            say "error: variable 'GATEWAYS': IPv6 $ERROR"
+    done
+
+    is_empty "${PING_HOST:-}" || {
+        is_empty "${PING_FQDN:-}" || resolve_ips "$PING_FQDN" ||
+            say "error: variable 'PING_HOST': $ERROR"
+    }
+
+    is_equal "$SPEEDTEST" "no" || {
+        is_empty "${SPEEDTEST_FQDN:-}" || resolve_ips "$SPEEDTEST_FQDN" ||
+            say "error: variable 'SPEEDTEST_HOST': $ERROR"
+    }
+
+    is_equal "$ROLE" "single" || {
+        is_empty "${VIRTUAL_PORT:-}" ||
+            is_port_free "$VIRTUAL_PORT" ||
+                say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
+    }
+}
+
+check_base_dependencies ()
+{
+    RETURN=0
+    for COMMAND in awk id ip ping printf sleep timeout
+    do
+        type "$COMMAND" >/dev/null 2>&1 || {
+            say "dependency not found: '$COMMAND'" >&2
+            RETURN="$SAY_RETURN"
         }
-    ' <<EOF
-$1
-EOF
+    done
+    is_equal "$RETURN" 0 || die "$RETURN"
+
+    if ping -4 -c 1 -w 1 127.0.0.1
+    then
+        PING4="ping -4"
+    else
+        PING4="ping"
+    fi >/dev/null 2>&1
+
+    if ping -6 -c 1 -w 1 ::1
+    then
+        PING6="ping -6"
+    elif ping6 -c 1 -w 1 ::1
+    then
+        PING6="ping6"
+    else
+        PING6=""
+    fi >/dev/null 2>&1
+
+    if timeout -t 1 sleep 0
+    then
+        TIMEOUT="timeout -t"
+    else
+        TIMEOUT="timeout"
+    fi >/dev/null 2>&1
+}
+
+check_permissions ()
+{
+    is_equal "$(id -u)" 0 ||
+        say "error: must be run as root to manage routes and interfaces."
 }
 
 deprecated_set_variables ()
@@ -1959,8 +2023,8 @@ main ()
     setup_core_env
     say "loading configuration..."
     include_config && set_variables
-    check_base_dependencies
-    check_functional_dependencies
+    resolve_dependencies
+    verify_network_state
     check_permissions
     is_equal $EXIT_CODE 0 || die
 
