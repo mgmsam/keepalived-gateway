@@ -429,51 +429,6 @@ collect_interface ()
     esac
 }
 
-optimize_gateways ()
-{
-    awk '
-        BEGIN {
-            FS = "="
-        }
-
-        {
-            interface = $1
-            gateway = $2
-            metric = ($3 == "" ? 0 : $3)
-            key = interface "=" gateway
-
-            if (!(key in best_metric) || metric < best_metric[key]) {
-                best_metric[key] = metric
-                pos[key] = $0
-            }
-
-            if (!(key in seen)) {
-                keys[++count] = key
-                seen[key] = 1
-            }
-        }
-
-        END {
-            for (i = 2; i <= count; i++) {
-                for (j = i; j > 1 && best_metric[keys[j-1]] > best_metric[keys[j]]; j--) {
-                    tmp = keys[j]
-                    keys[j] = keys[j-1]
-                    keys[j-1] = tmp
-                }
-            }
-
-            gateways = ""
-            for (i = 1; i <= count; i++) {
-                gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
-            }
-
-            if (gateways != "") print gateways
-        }
-    ' <<EOF
-$1
-EOF
-}
-
 count_metrics ()
 {
     set -- $1
@@ -510,8 +465,6 @@ parse_gateway ()
         is_empty "${INTERFACE:-}" || collect_interface
     done
 
-    GATEWAYS_IPV4="$(optimize_gateways "${GATEWAYS_IPV4:-}")"
-    GATEWAYS_IPV6="$(optimize_gateways "${GATEWAYS_IPV6:-}")"
     TOTAL_METRICS_IPV4="$(count_metrics "${METRICS_IPV4:-}")"
     TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
 }
@@ -1054,19 +1007,70 @@ verify_gateways_remote ()
     }
 }
 
+optimize_gateways ()
+{
+    awk '
+        BEGIN {
+            FS = "="
+        }
+
+        {
+            interface = $1
+            gateway = $2
+            metric = ($3 == "" ? 0 : $3)
+            key = interface "=" gateway
+
+            if (!(key in best_metric) || metric < best_metric[key]) {
+                best_metric[key] = metric
+                pos[key] = $0
+            }
+
+            if (!(key in seen)) {
+                keys[++count] = key
+                seen[key] = 1
+            }
+        }
+
+        END {
+            for (i = 2; i <= count; i++) {
+                for (j = i; j > 1 && best_metric[keys[j-1]] > best_metric[keys[j]]; j--) {
+                    tmp = keys[j]
+                    keys[j] = keys[j-1]
+                    keys[j-1] = tmp
+                }
+            }
+
+            gateways = ""
+            for (i = 1; i <= count; i++) {
+                gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
+            }
+
+            if (gateways != "") print gateways
+        }
+    ' <<EOF
+$1
+EOF
+}
+
 verify_network_state ()
 {
-    for GATEWAY in ${GATEWAYS_IPV4:-}
-    do
-        verify_gateway_remote "$GATEWAY" "IPv4" ||
-            say "error: variable 'GATEWAYS': IPv4 $ERROR"
-    done
+    is_empty "${GATEWAYS_IPV4:-}" || {
+        GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
+        for GATEWAY in $GATEWAYS_IPV4
+        do
+            verify_gateway_remote "$GATEWAY" "IPv4" ||
+                say "error: variable 'GATEWAYS': IPv4 $ERROR"
+        done
+    }
 
-    for GATEWAY in ${GATEWAYS_IPV6:-}
-    do
-        verify_gateway_remote "$GATEWAY" "IPv6" ||
-            say "error: variable 'GATEWAYS': IPv6 $ERROR"
-    done
+    is_empty "${GATEWAYS_IPV6:-}" || {
+        GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
+        for GATEWAY in ${GATEWAYS_IPV6:-}
+        do
+            verify_gateway_remote "$GATEWAY" "IPv6" ||
+                say "error: variable 'GATEWAYS': IPv6 $ERROR"
+        done
+    }
 
     is_empty "${PING_HOST:-}" || {
         is_empty "${PING_FQDN:-}" || resolve_ips "$PING_FQDN" ||
