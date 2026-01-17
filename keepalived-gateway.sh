@@ -831,6 +831,7 @@ set_variables ()
         ;;
         *)
             say 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave'"
+            ROLE="single"
         ;;
     esac
 
@@ -915,95 +916,311 @@ is_remote_ip ()
     :
 }
 
-resolve_ips ()
-{
-    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
-        /PING/ {
-            split($0, a, /[()]/)
-            print a[2]
-            exit
-        }
-    ')" || :
-
-    is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
-            /PING/ {
-                split($0, a, /[()]/)
-                print a[2]
-                exit
-            }
-        ')" || :
-
-    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
-
-    is_not_empty "${IPV4:-}" ||
-        IPV4=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /\./) {
-                        print $1
-                        exit
-                    }
-                }
-            }
-        ' /etc/hosts)
-
-    is_not_empty "${IPV6:-}" ||
-        IPV6=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /:/) {
-                        print $1
-                        exit
-                    }
-                }
-            }
-        ' /etc/hosts)
-}
-
 resolve_dependencies ()
 {
-    RETURN=0
-    MISSING_DEPS=""
+    NET_TOOL=""
+
+    AWK_ADDRESS_PARSER='
+        $1 ~ /^inet6?$/ {
+            if ($0 ~ /addr:/) {
+                split($0, line, "addr:")
+                split(line[2], ip_mask_zone, " ")
+                address = ip_mask_zone[1]
+            } else {
+                address = $2
+            }
+            if (address) {
+                split(address, ip, "[/%]")
+                print ip[1]
+            }
+        }
+    '
+    AWK_UNIQUE_COLLECT='
+        if ($1 != "" && !($1 in seen)) {
+            list[++count] = $1
+            seen[$1] = 1
+        }
+    '
+    AWK_NATURAL_SORT='
+        function get_nat_key(s, res, i, c, n) {
+            res = ""
+            i = 1
+            while (i <= length(s)) {
+                c = substr(s, i, 1)
+                if (c ~ /[0-9]/) {
+                    n = ""
+                    while (i <= length(s) && substr(s, i, 1) ~ /[0-9]/) {
+                        n = n substr(s, i, 1)
+                        i++
+                    }
+                    res = res sprintf("%010d", n)
+                }
+                else {
+                    res = res c
+                    i++
+                }
+            }
+            return res
+        }
+        END {
+            for (i = 1; i <= count; i++) keys[i] = get_nat_key(list[i])
+            for (i = 2; i <= count; i++) {
+                for (j = i; j > 1 && keys[j-1] > keys[j]; j--) {
+                    tmp = list[j]
+                    list[j] = list[j-1]
+                    list[j-1] = tmp
+                    tk = keys[j]
+                    keys[j] = keys[j-1]
+                    keys[j-1] = tk
+                }
+            }
+            for (i = 1; i <= count; i++) print list[i]
+        }
+    '
+
+    if type ip >/dev/null 2>&1
+    then
+        NET_TOOL="ip"
+        show_addresses ()
+        {
+            ip address show | awk "$AWK_ADDRESS_PARSER"
+        }
+
+        show_interfaces ()
+        {
+            ip link show | awk '
+                /^[0-9]+:/ {
+                    split($2, iface, ":")
+                    print iface[1]
+                }
+            '
+        }
+
+        show_interfaces ()
+        {
+            ip link show | awk '
+                $1 ~ /^[0-9]+:$/ {
+                    sub(/:$/, "", $2)
+                    $1 = $2
+                    {
+                        if ($1 ~ /^[a-z0-9]+$/) {
+                            '"$AWK_UNIQUE_COLLECT"'
+                        }
+                    }
+                }
+                '"$AWK_NATURAL_SORT"'
+            '
+        }
+
+        show_routes ()
+        {
+            ip route show
+        }
+
+        control_route ()
+        {
+            ip route "$1" $2
+        }
+
+    elif type ifconfig >/dev/null 2>&1
+    then
+        NET_TOOL="ifconfig"
+        show_addresses ()
+        {
+            ifconfig -a | awk "$AWK_ADDRESS_PARSER"
+        }
+
+        show_interfaces ()
+        {
+            ifconfig -a | awk '
+                /^[a-zA-Z0-9]/ && !/^[0-9]+:/ {
+                    sub(/:$/, "", $1)
+                    {
+                        if ($1 ~ /^[a-z0-9]+$/) {
+                            '"$AWK_UNIQUE_COLLECT"'
+                        }
+                    }
+                }
+                '"$AWK_NATURAL_SORT"'
+            '
+        }
+    else
+        say 127 "error: environment: network management tools not found: 'ip|ifconfig'"
+    fi
+
+    show_ports ()
+    {
+        netstat -an | awk '
+            $1 ~ /^tcp/ && !/LISTEN/ {
+                next
+            }
+            $1 ~ /^tcp|^udp/ {
+                split($4, port, "[:.]")
+                $1 = port[length(port)]
+                if ($1 ~ /^[0-9]+$/) {
+                    '"$AWK_UNIQUE_COLLECT"'
+                }
+            }
+            '"$AWK_NATURAL_SORT"'
+        '
+    }
+
+    if is_equal "${NET_TOOL:-}" "ip"
+    then
+        is_equal "$ROLE" "single" ||
+        if type ss >/dev/null 2>&1
+        then
+            show_ports ()
+            {
+                ss -Hnuta | awk '
+                    $1 == "tcp" && $2 != "LISTEN" {
+                        next
+                    }
+                    {
+                        split($5, port, ":")
+                        $1 = port[length(port)]
+                        if ($1 ~ /^[0-9]+$/) {
+                            '"$AWK_UNIQUE_COLLECT"'
+                        }
+                    }
+                    '"$AWK_NATURAL_SORT"'
+                '
+            }
+        elif type netstat >/dev/null 2>&1
+        then
+            :
+        elif is_file /proc/net/tcp  ||
+             is_file /proc/net/tcp6 ||
+             is_file /proc/net/udp  ||
+             is_file /proc/net/udp6
+        then
+            PROC_NET_TCP=""
+            for i in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6
+            do
+                is_file $i &&
+                    PROC_NET_TCP="${PROC_NET_TCP:+$PROC_NET_TCP }$i" || :
+            done
+            show_ports ()
+            {
+                for i in $PROC_NET_TCP
+                do
+                    case "$i" in
+                        *tcp*)
+                            STATE_FILTER="0A"
+                        ;;
+                        *udp*)
+                            STATE_FILTER="[0-9A-F]+"
+                        ;;
+                    esac
+                    awk '
+                        function hex2dec(h, i, x, d) {
+                            h = tolower(h)
+                            sub(/^0x/, "", h)
+                            d = 0
+                            for (i = 1; i <= length(h); i++) {
+                                x = index("0123456789abcdef", substr(h, i, 1)) - 1
+                                d = d * 16 + x
+                            }
+                            return d
+                        }
+                        $4 ~ /^'"$STATE_FILTER"'$/ && $2 ~ /:[0-9A-F]+$/ {
+                            sub(/^[^:]+:/, "", $2)
+                            $1 = hex2dec($2)
+                            if ($1 ~ /^[0-9]+$/) print $1
+                        }
+                    ' "$i"
+                done | awk '
+                    {
+                        '"$AWK_UNIQUE_COLLECT"'
+                    }
+                    '"$AWK_NATURAL_SORT"'
+                '
+            }
+        else
+            say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss|netstat' not found"
+        fi
+    else
+        if type netstat >/dev/null 2>&1
+        then
+            show_routes ()
+            {
+                netstat -rn
+            }
+        else
+            say 127 "error: environment: routing table check impossible: 'netstat' not found"
+        fi
+
+        if type route >/dev/null 2>&1
+        then
+            control_route ()
+            {
+                case "$1" in
+                    replace)
+                        route del $2 >/dev/null 2>&1
+                        route add $2
+                    ;;
+                    *)
+                        route "$1" $2
+                    ;;
+                esac
+            }
+        else
+            say 127 "error: environment: route management impossible: 'route' not found"
+        fi
+    fi
+
+    is_empty "${PING_HOST:-}" && is_equal "$SPEEDTEST" "yes" &&
+    is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
+        type ping >/dev/null 2>&1 && {
+
+            ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
+                PING4="ping -4" ||
+                PING4="ping"
+
+            if ping -6 -c 1 -w 1 ::1
+            then
+                PING6="ping -6"
+            elif ping6 -c 1 -w 1 ::1
+            then
+                PING6="ping6"
+            else
+                PING6=""
+            fi >/dev/null 2>&1
+
+        } || say 127 "error: environment: gateway check impossible: 'ping' not found"
+    }
 
     is_equal "$SPEEDTEST" "no" || {
 
+        MISSING_DEPS=""
         for COMMAND in date wc
         do
             type "$COMMAND" >/dev/null 2>&1 ||
                 MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS|}$COMMAND"
         done
-
         is_empty "${MISSING_DEPS:-}" ||
-            say "error: speedtest enabled, but dependency not found: '$MISSING_DEPS'"
+            say 127 "error: variable 'SPEEDTEST': performance test impossible: '$MISSING_DEPS' not found"
     }
 
-    is_equal "$RETURN" 0 || die "$RETURN"
-}
+    type awk >/dev/null 2>&1 && AWK="yes" || {
+        AWK=""
+        say 127 "error: environment: parsing impossible: 'awk' not found"
+    }
 
-verify_gateways_remote ()
-{
-    FAMILY="$1"
-    IFS="="
-    set -- $2
-    IFS="$POSIX_IFS"
+    type timeout >/dev/null 2>&1 && {
+        timeout -t 1 sh -c : >/dev/null 2>&1 &&
+            TIMEOUT="timeout -t" ||
+            TIMEOUT="timeout"
+    } || {
+        TIMEOUT=""
+        say 127 "error: environment: process hang protection impossible: 'timeout' not found"
+    }
 
-    case "${1:-}" in
-        *[.:]*)
-            INTERFACE=
-            GATEWAY="$1"
-            METRIC="${2:-}"
-        ;;
-        *)
-            INTERFACE="$1"
-            GATEWAY="$2"
-            METRIC="${3:-}"
-        ;;
-    esac
-
-    is_remote_ip "$FAMILY" "$GATEWAY" || {
-        ERROR="address is assigned to this host (loopback risk): $GATEWAY"
-        return 2
+    type sleep >/dev/null 2>&1 && SLEEP="sleep" || {
+        SLEEP="return"
+        SAVED_EXIT_CODE="$EXIT_CODE"
+        say "error: environment: continuous monitoring impossible: 'sleep' not found"
+        EXIT_CODE="$SAVED_EXIT_CODE"
     }
 }
 
@@ -1052,6 +1269,78 @@ $1
 EOF
 }
 
+verify_gateways_remote ()
+{
+    FAMILY="$1"
+    IFS="="
+    set -- $2
+    IFS="$POSIX_IFS"
+
+    case "${1:-}" in
+        *[.:]*)
+            INTERFACE=
+            GATEWAY="$1"
+            METRIC="${2:-}"
+        ;;
+        *)
+            INTERFACE="$1"
+            GATEWAY="$2"
+            METRIC="${3:-}"
+        ;;
+    esac
+
+    is_remote_ip "$FAMILY" "$GATEWAY" || {
+        ERROR="address is assigned to this host (loopback risk): $GATEWAY"
+        return 2
+    }
+}
+
+resolve_ips ()
+{
+    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
+        /PING/ {
+            split($0, a, /[()]/)
+            print a[2]
+            exit
+        }
+    ')" || :
+
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
+            /PING/ {
+                split($0, a, /[()]/)
+                print a[2]
+                exit
+            }
+        ')" || :
+
+    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
+
+    is_not_empty "${IPV4:-}" ||
+        IPV4=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /\./) {
+                        print $1
+                        exit
+                    }
+                }
+            }
+        ' /etc/hosts)
+
+    is_not_empty "${IPV6:-}" ||
+        IPV6=$(awk '
+            /^[ \t]*[^#]/ {
+                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                    if ($1 ~ /:/) {
+                        print $1
+                        exit
+                    }
+                }
+            }
+        ' /etc/hosts)
+}
+
 verify_network_state ()
 {
     is_empty "${GATEWAYS_IPV4:-}" || {
@@ -1086,10 +1375,23 @@ verify_network_state ()
         is_empty "${VIRTUAL_PORT:-}" ||
             is_port_free "$VIRTUAL_PORT" ||
                 say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
+
+        # web-server
+    }
+
+    is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
+        # web-client
+        for COMMAND in wget curl nc
+        do
+            if type "$COMMAND" >/dev/null 2>&1
+            then
+
+            fi
+        done
     }
 }
 
-check_base_dependencies ()
+deprecated_check_base_dependencies ()
 {
     RETURN=0
     for COMMAND in awk id ip ping printf sleep timeout
