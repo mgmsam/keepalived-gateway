@@ -920,21 +920,6 @@ resolve_dependencies ()
 {
     NET_TOOL=""
 
-    AWK_ADDRESS_PARSER='
-        $1 ~ /^inet6?$/ {
-            if ($0 ~ /addr:/) {
-                split($0, line, "addr:")
-                split(line[2], ip_mask_zone, " ")
-                address = ip_mask_zone[1]
-            } else {
-                address = $2
-            }
-            if (address) {
-                split(address, ip, "[/%]")
-                print ip[1]
-            }
-        }
-    '
     AWK_UNIQUE_COLLECT='
         if ($1 != "" && !($1 in seen)) {
             list[++count] = $1
@@ -976,6 +961,23 @@ resolve_dependencies ()
             }
             for (i = 1; i <= count; i++) print list[i]
         }
+    '
+    AWK_ADDRESS_PARSER='
+        $1 ~ /^inet6?$/ {
+            if ($0 ~ /addr:/) {
+                split($0, line, "addr:")
+                split(line[2], ip_mask_zone, " ")
+                address = ip_mask_zone[1]
+            } else {
+                address = $2
+            }
+            if (address) {
+                split(address, ip, "[/%]")
+                $1 = ip[1]
+                '"$AWK_UNIQUE_COLLECT"'
+            }
+        }
+        '"$AWK_NATURAL_SORT"'
     '
 
     if type ip >/dev/null 2>&1
