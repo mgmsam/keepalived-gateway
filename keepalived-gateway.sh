@@ -528,17 +528,22 @@ is_port ()
 parse_resource ()
 {
     ERROR=""
+
     SCHEME=""
+
     USER_INFO=""
     USER=""
     PASS=""
-    WWW=""
+
     AUTHORITY=""
-    MASK=""
-    PORT=""
-    RESOURCE=""
+    WWW=""
+    FQDN=""
     IPV4=""
     IPV6=""
+    MASK=""
+    PORT=""
+
+    RESOURCE=""
     FAMILY=""
 
     HOST="$1"
@@ -839,17 +844,20 @@ set_variables ()
         is_equal "$ROLE" "single" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || {
+        VIRTUAL_IPADDRESS_IPV4=""
+        VIRTUAL_IPADDRESS_IPV6=""
+
         parse_resource "$VIRTUAL_IPADDRESS" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
-        is_empty "${SCHEME:-}${USER_INFO:-}${RESOURCE:-}${PORT:-}" ||
-            say 2 "error: variable 'VIRTUAL_IPADDRESS': URL-components (scheme, user, port, path) are not allowed"
+        is_empty "${SCHEME:-}${USER_INFO:-}${FQDN:-}${PORT:-}${RESOURCE:-}" ||
+            say 2 "error: variable 'VIRTUAL_IPADDRESS': only plain IPv4/IPv6 [with CIDR] allowed"
 
         is_not_empty "${IPV4:-"${IPV6:-}"}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address"
 
-        VIRTUAL_IPADDRESS="${IPV4:-"$IPV6"}${MASK:+"/$MASK"}"
-        VIRTUAL_IPADDRESS_FAMILY="${FAMILY:-}"
+        VIRTUAL_IPADDRESS_IPV4="${IPV4:+$IPV4${MASK:+"/$MASK"}}"
+        VIRTUAL_IPADDRESS_IPV6="${IPV6:+$IPV6${MASK:+"/$MASK"}}"
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
@@ -1182,7 +1190,7 @@ resolve_dependencies ()
             if ping -6 -c 1 -w 1 ::1
             then
                 PING6="ping -6"
-            elif ping6 -c 1 -w 1 ::1
+            elif type ping6 && ping6 -c 1 -w 1 ::1
             then
                 PING6="ping6"
             else
@@ -1377,19 +1385,6 @@ verify_network_state ()
         is_empty "${VIRTUAL_PORT:-}" ||
             is_port_free "$VIRTUAL_PORT" ||
                 say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
-
-        # web-server
-    }
-
-    is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
-        # web-client
-        for COMMAND in wget curl nc
-        do
-            if type "$COMMAND" >/dev/null 2>&1
-            then
-
-            fi
-        done
     }
 }
 
