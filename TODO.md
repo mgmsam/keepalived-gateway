@@ -10,6 +10,16 @@
 
 `resolve_dependencies`
 
+- [ ] Поправить код `awk` в переменных `AWK_UNIQUE_COLLECT` и/или `AWK_NATURAL_SORT`, т.е. есть мусор:
+
+      ```
+      root@OpenWrt:~# show_ports
+      netstat: no kernel support for AF INET6 (tcp)
+      netstat: no kernel support for AF INET6 (udp)
+      netstat: no kernel support for AF INET6 (raw)
+      root@OpenWrt:~#
+      ```
+
 - [ ] Для проверки программы на поддержку IPv[46] делаеться пробный запуск на
       127.0.0.1/::1 с портом 0 и задержкой 1 секунда для анализа ошибок программы.
       Необходимо ввести ключь/параметр для включения/выключения данной проверки.

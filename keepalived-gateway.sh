@@ -844,9 +844,6 @@ set_variables ()
         is_equal "$ROLE" "single" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
     } || {
-        VIRTUAL_IPADDRESS_IPV4=""
-        VIRTUAL_IPADDRESS_IPV6=""
-
         parse_resource "$VIRTUAL_IPADDRESS" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
@@ -856,8 +853,8 @@ set_variables ()
         is_not_empty "${IPV4:-"${IPV6:-}"}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address"
 
-        VIRTUAL_IPADDRESS_IPV4="${IPV4:+$IPV4${MASK:+"/$MASK"}}"
-        VIRTUAL_IPADDRESS_IPV6="${IPV6:+$IPV6${MASK:+"/$MASK"}}"
+        VIRTUAL_IPADDRESS_FAMILY="${FAMILY:-}"
+        VIRTUAL_IPADDRESS="${IPV4:-${IPV6:-}}"
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
@@ -1164,6 +1161,7 @@ resolve_dependencies ()
                 '
             }
         else
+            unset -f show_ports
             say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss|netstat' not found"
         fi
     else
@@ -1174,6 +1172,7 @@ resolve_dependencies ()
                 netstat -rn
             }
         else
+            unset -f show_ports
             say 127 "error: environment: routing table check impossible: 'netstat' not found"
         fi
 
@@ -1268,25 +1267,26 @@ resolve_dependencies ()
             say 127 "error: environment: sync server determination impossible: 'sleep' not found" || :
         is_empty "${TIMEOUT:-}" &&
             say 127 "error: environment: sync server determination impossible: 'timeout' not found" || :
-        is_empty "${VIRTUAL_IPADDRESS_IPV4:-${VIRTUAL_IPADDRESS_IPV6:-}}" &&
+        is_empty "${VIRTUAL_PORT:-}" &&
+            say 127 "error: variable 'VIRTUAL_PORT': sync server determination impossible: check failed" || :
+        is_empty "${VIRTUAL_IPADDRESS:-}" &&
             say 127 "error: variable 'VIRTUAL_IPADDRESS': sync server determination impossible: expected IPv4/IPv6 [with CIDR]"
     } || {
 
         LOCAL_IP=""
 
-        is_empty "${VIRTUAL_IPADDRESS_IPV6:-}" || {
-            is_equal "$HAS_IPV6_STACK" "yes" && {
-                LOCAL_IP="::1"
-                BIND_IP="[$LOCAL_IP]"
-            } || say "error: environment: IPv6 stack is disabled or '::1' is missing on lo: cannot host sync server for IPv6"
-        }
-
-        is_empty "${VIRTUAL_IPADDRESS_IPV4:-}" || {
+        if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
+        then
             is_equal "$HAS_IPV4_STACK" "yes" && {
                 LOCAL_IP="127.0.0.1"
                 BIND_IP="$LOCAL_IP"
             } || say "error: environment: IPv4 stack is disabled or '127.0.0.1' is missing on lo: cannot host sync server for IPv4"
-        }
+        else
+            is_equal "$HAS_IPV6_STACK" "yes" && {
+                LOCAL_IP="::1"
+                BIND_IP="[$LOCAL_IP]"
+            } || say "error: environment: IPv6 stack is disabled or '::1' is missing on lo: cannot host sync server for IPv6"
+        fi
 
         check_daemon ()
         {
@@ -1297,45 +1297,32 @@ resolve_dependencies ()
             then
                 kill "$COMMAND_PID"
                 wait "$COMMAND_PID"
-                GATEWAYS_SERVER_DISPATCHER="serve_gateways_$1"
                 return 0
             fi 2>/dev/null
             return 1
         }
 
-        is_netcat_server_capable ()
-        {
-            case "${NETCAT_STAT:-}" in
-                *not_a_port*)
-                    case "$NETCAT_STAT" in
-                        *[uU]sage*)
-                        ;;
-                        *)
-                            return
-                        ;;
-                    esac
-                ;;
-            esac
-            return 1
-        }
-
         detect_netcat_server ()
         {
-            NETCAT=""
-            check_daemon nc -l -p 0 || check_daemon nc -l $LOCAL_IP 0
-
-            NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
-            if is_netcat_server_capable
+            # Debian
+            if check_daemon nc -l -p $VIRTUAL_PORT $LOCAL_IP
             then
-                NETCAT="nc -l -p"
-                return
+                SERVER="nc -l -p $VIRTUAL_PORT $VIRTUAL_IPADDRESS"
+                return 0
             fi
 
-            NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
-            if is_netcat_server_capable
+            # Ubuntu
+            if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
             then
-                NETCAT="nc -l"
-                return
+                SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
+                return 0
+            fi
+
+            # FreeBSD
+            if check_daemon nc -l $LOCAL_IP $VIRTUAL_PORT
+            then
+                SERVER="nc -l $VIRTUAL_IPADDRESS $VIRTUAL_PORT"
+                return 0
             fi
 
             return 1
@@ -1343,28 +1330,34 @@ resolve_dependencies ()
 
         GATEWAYS_SERVER_DISPATCHER=""
         is_empty "${LOCAL_IP:-}" || {
-            for COMMAND in uhttpd httpd mini_httpd mini-httpd telnetd nc
+            for COMMAND in nc uhttpd httpd telnetd
             do
                 if type "$COMMAND" >/dev/null 2>&1
                 then
                     case "$COMMAND" in
-                        uhttpd | httpd)
-                            check_daemon $COMMAND -p $BIND_IP:0 -f
+                        nc)
+                            detect_netcat_server &&
+                                GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
                         ;;
-                        mini_httpd | mini-httpd)
-                            check_daemon $COMMAND -p $BIND_IP:0 -D
+                        uhttpd | httpd)
+                            check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
+                                GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
+                                is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
+                                    SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
+                                    SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
+                            }
                         ;;
                         telnetd)
-                            check_daemon $COMMAND -p 0 -b $LOCAL_IP -F
-                        ;;
-                        nc)
-                            # в процессе
+                            check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
+                                GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
+                                SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
+                            }
                         ;;
                     esac && break || :
                 fi
             done
             is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
-                say 127 "error: environment: ..."
+                say 127 "error: environment: no suitable network dispatcher found: install 'nc', 'uhttpd', 'httpd' or 'telnetd'"
         }
     }
 
@@ -2290,7 +2283,7 @@ is_process_alive ()
     is_dir "/proc/$1"
 }
 
-serve_gateways_nc ()
+serve_gateways_netcat ()
 {
     trap '
         trap - 0
@@ -2300,7 +2293,7 @@ serve_gateways_nc ()
 
     while :
     do
-        $NETCAT "$VIRTUAL_PORT" <<EOF >/dev/null 2>&1 &
+        $SERVER <<EOF >/dev/null 2>&1 &
 HTTP/1.1 200 OK$CR
 Content-Type: text/plain$CR
 Content-Length: ${#DEFAULT_GATEWAYS}$CR
@@ -2313,14 +2306,14 @@ EOF
     done
 }
 
-serve_gateways_uhttpd ()
+serve_gateways_httpd ()
 {
-    uhttpd -p "$VIRTUAL_PORT" -h "${GATEWAYS_STATE_FILE%/*}" -Rf
+    $SERVER -h "${GATEWAYS_STATE_FILE%/*}"
 }
 
 serve_gateways_telnetd ()
 {
-    telnetd -p "$VIRTUAL_PORT" -f "$GATEWAYS_STATE_FILE" -l : -KF
+    $SERVER -f "$GATEWAYS_STATE_FILE"
 }
 
 share_gateways ()
@@ -2411,10 +2404,12 @@ fetch_gateways ()
     } >&2
 
     FETCHED_GATEWAYS="$(awk '
-        /=/ {
+        {
             gsub(/\r/, "")
-            print
-            exit
+            if ($0 ~ /^\377/) next
+            if ($0 ~ /^(GET|Host|User-Agent|Accept|Connection|HTTP\/)/) next
+            if ($0 ~ /^[[:space:]]*$/) next
+            print $0
         }
     ' <<EOF
 $FETCHED_GATEWAYS
