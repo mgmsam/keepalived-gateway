@@ -938,6 +938,161 @@ probe_stack_capability ()
     esac
 }
 
+is_port_free ()
+{
+    show_ports | awk '
+        $1 ~ /^'"$1"'$/ {
+            found = "yes"
+            exit
+        }
+        END {
+            if (found == "yes") exit 1
+            exit 0
+        }
+    '
+}
+
+is_sync_enabled ()
+{
+    if is_equal "$ROLE" "single"
+    then
+        return 0
+    fi
+
+    RETURN=0
+    ERROR="sync server determination impossible"
+
+    is_equal "$SLEEP" "sleep" || {
+        say 127 "error: environment: $ERROR: 'sleep' not found"
+        RETURN=1
+    }
+
+    is_not_empty "${TIMEOUT:-}" || {
+        say 127 "error: environment: $ERROR: 'timeout' not found"
+        RETURN=1
+    }
+
+    if is_not_empty "${HAS_PORT_AUDIT:-}"
+    then
+        if is_not_empty "${VIRTUAL_PORT:-}"
+        then
+            is_port_free "$VIRTUAL_PORT" || {
+                say 127 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
+                RETURN=1
+            }
+        else
+            say 127 "error: variable 'VIRTUAL_PORT': $ERROR: check failed"
+            RETURN=1
+        fi
+    else
+        say 127 "error: environment: $ERROR: 'ss' or 'netstat' not found"
+        RETURN=1
+    fi
+
+    is_not_empty "${VIRTUAL_IPADDRESS:-}" || {
+        say 127 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: expected IPv4/IPv6 address"
+        RETURN=1
+    }
+
+    if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
+    then
+        is_equal "$HAS_IPV4_STACK" "yes" && {
+            LOCAL_IP="127.0.0.1"
+            BIND_IP="$LOCAL_IP"
+        } || {
+            say "error: environment: IPv4 stack is disabled or '127.0.0.1' is missing on lo: cannot host sync server for IPv4"
+            RETURN=1
+        }
+    else
+        is_equal "$HAS_IPV6_STACK" "yes" && {
+            LOCAL_IP="::1"
+            BIND_IP="[$LOCAL_IP]"
+        } || {
+            say "error: environment: IPv6 stack is disabled or '::1' is missing on lo: cannot host sync server for IPv6"
+            RETURN=1
+        }
+    fi
+
+    return $RETURN
+}
+
+resolve_sync_server ()
+{
+    LOCAL_IP=""
+
+    check_daemon ()
+    {
+        $@ >&2 &
+        COMMAND_PID=$!
+        sleep 1
+        if kill -0 "$COMMAND_PID"
+        then
+            kill "$COMMAND_PID"
+            wait "$COMMAND_PID"
+            return 0
+        fi 2>/dev/null
+        return 1
+    }
+
+    detect_netcat_server ()
+    {
+        # Debian
+        if check_daemon nc -l -p $VIRTUAL_PORT $LOCAL_IP
+        then
+            SERVER="nc -l -p $VIRTUAL_PORT $VIRTUAL_IPADDRESS"
+            return 0
+        fi
+
+        # Ubuntu
+        if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
+        then
+            SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
+            return 0
+        fi
+
+        # FreeBSD
+        if check_daemon nc -l $LOCAL_IP $VIRTUAL_PORT
+        then
+            SERVER="nc -l $VIRTUAL_IPADDRESS $VIRTUAL_PORT"
+            return 0
+        fi
+
+        return 1
+    }
+
+    GATEWAYS_SERVER_DISPATCHER=""
+    is_empty "${LOCAL_IP:-}" || {
+        for COMMAND in nc uhttpd httpd telnetd
+        do
+            if type "$COMMAND" >/dev/null 2>&1
+            then
+                case "$COMMAND" in
+                    nc)
+                        detect_netcat_server &&
+                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
+                    ;;
+                    uhttpd | httpd)
+                        check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
+                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
+                            is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
+                                SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
+                                SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
+                        }
+                    ;;
+                    telnetd)
+                        check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
+                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
+                            SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
+                        }
+                    ;;
+                esac && break || :
+            fi
+        done
+        is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+            say 127 "error: environment: no suitable network dispatcher found: install 'nc', 'uhttpd', 'httpd' or 'telnetd'"
+    }
+}
+
 resolve_dependencies ()
 {
     NET_TOOL=""
@@ -1072,6 +1227,7 @@ resolve_dependencies ()
         say 127 "error: environment: network management tools not found: 'ip|ifconfig'"
     fi
 
+    HAS_PORT_AUDIT="yes"
     show_ports ()
     {
         netstat -an | awk '
@@ -1161,7 +1317,7 @@ resolve_dependencies ()
                 '
             }
         else
-            unset -f show_ports
+            HAS_PORT_AUDIT=""
             say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss|netstat' not found"
         fi
     else
@@ -1172,7 +1328,7 @@ resolve_dependencies ()
                 netstat -rn
             }
         else
-            unset -f show_ports
+            HAS_PORT_AUDIT=""
             say 127 "error: environment: routing table check impossible: 'netstat' not found"
         fi
 
@@ -1262,104 +1418,10 @@ resolve_dependencies ()
         say 127 "error: environment: process hang protection impossible: 'timeout' not found"
     }
 
-    is_equal "$ROLE" "single" || {
-        is_equal "$SLEEP" return &&
-            say 127 "error: environment: sync server determination impossible: 'sleep' not found" || :
-        is_empty "${TIMEOUT:-}" &&
-            say 127 "error: environment: sync server determination impossible: 'timeout' not found" || :
-        is_empty "${VIRTUAL_PORT:-}" &&
-            say 127 "error: variable 'VIRTUAL_PORT': sync server determination impossible: check failed" || :
-        is_empty "${VIRTUAL_IPADDRESS:-}" &&
-            say 127 "error: variable 'VIRTUAL_IPADDRESS': sync server determination impossible: expected IPv4/IPv6 [with CIDR]"
-    } || {
-
-        LOCAL_IP=""
-
-        if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
-        then
-            is_equal "$HAS_IPV4_STACK" "yes" && {
-                LOCAL_IP="127.0.0.1"
-                BIND_IP="$LOCAL_IP"
-            } || say "error: environment: IPv4 stack is disabled or '127.0.0.1' is missing on lo: cannot host sync server for IPv4"
-        else
-            is_equal "$HAS_IPV6_STACK" "yes" && {
-                LOCAL_IP="::1"
-                BIND_IP="[$LOCAL_IP]"
-            } || say "error: environment: IPv6 stack is disabled or '::1' is missing on lo: cannot host sync server for IPv6"
-        fi
-
-        check_daemon ()
-        {
-            $@ >&2 &
-            COMMAND_PID=$!
-            sleep 1
-            if kill -0 "$COMMAND_PID"
-            then
-                kill "$COMMAND_PID"
-                wait "$COMMAND_PID"
-                return 0
-            fi 2>/dev/null
-            return 1
-        }
-
-        detect_netcat_server ()
-        {
-            # Debian
-            if check_daemon nc -l -p $VIRTUAL_PORT $LOCAL_IP
-            then
-                SERVER="nc -l -p $VIRTUAL_PORT $VIRTUAL_IPADDRESS"
-                return 0
-            fi
-
-            # Ubuntu
-            if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
-            then
-                SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
-                return 0
-            fi
-
-            # FreeBSD
-            if check_daemon nc -l $LOCAL_IP $VIRTUAL_PORT
-            then
-                SERVER="nc -l $VIRTUAL_IPADDRESS $VIRTUAL_PORT"
-                return 0
-            fi
-
-            return 1
-        }
-
-        GATEWAYS_SERVER_DISPATCHER=""
-        is_empty "${LOCAL_IP:-}" || {
-            for COMMAND in nc uhttpd httpd telnetd
-            do
-                if type "$COMMAND" >/dev/null 2>&1
-                then
-                    case "$COMMAND" in
-                        nc)
-                            detect_netcat_server &&
-                                GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
-                        ;;
-                        uhttpd | httpd)
-                            check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
-                                GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
-                                is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
-                                    SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
-                                    SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
-                            }
-                        ;;
-                        telnetd)
-                            check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
-                                GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
-                                SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
-                            }
-                        ;;
-                    esac && break || :
-                fi
-            done
-            is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
-                say 127 "error: environment: no suitable network dispatcher found: install 'nc', 'uhttpd', 'httpd' or 'telnetd'"
-        }
-    }
+    if is_sync_enabled
+    then
+        resolve_sync_server
+    fi
 
     is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
         # web-client
@@ -1718,20 +1780,6 @@ deprecated_set_variables ()
 is_local_interface ()
 {
     ip link show ${1:-} >/dev/null 2>&1
-}
-
-is_port_free ()
-{
-    cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '
-        $2 ~ /:'"$(printf "%04X" "$1")"'$/ {
-            found = "yes"
-            exit
-        }
-        END {
-            if (found == "yes") exit 1
-            exit 0
-        }
-    '
 }
 
 detect_sync_transport ()
