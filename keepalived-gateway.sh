@@ -1098,11 +1098,10 @@ resolve_sync_server ()
 resolve_dependencies ()
 {
     NET_TOOL=""
-
     AWK_UNIQUE_COLLECT='
-        if ($1 != "" && !($1 in seen)) {
-            list[++count] = $1
-            seen[$1] = 1
+        if (!seen[value]) {
+            seen[value] = 1
+            list[++count] = value
         }
     '
     AWK_NATURAL_SORT='
@@ -1127,6 +1126,7 @@ resolve_dependencies ()
             return res
         }
         END {
+            if (count == 0) exit 0
             for (i = 1; i <= count; i++) keys[i] = get_nat_key(list[i])
             for (i = 2; i <= count; i++) {
                 for (j = i; j > 1 && keys[j-1] > keys[j]; j--) {
@@ -1142,7 +1142,7 @@ resolve_dependencies ()
         }
     '
     AWK_ADDRESS_PARSER='
-        $1 ~ /^inet6?$/ {
+        /inet6?/ {
             if ($0 ~ /addr:/) {
                 split($0, line, "addr:")
                 split(line[2], ip_mask_zone, " ")
@@ -1152,7 +1152,7 @@ resolve_dependencies ()
             }
             if (address) {
                 split(address, ip, "[/%]")
-                $1 = ip[1]
+                value = ip[1]
                 '"$AWK_UNIQUE_COLLECT"'
             }
         }
@@ -1164,30 +1164,17 @@ resolve_dependencies ()
         NET_TOOL="ip"
         show_addresses ()
         {
-            ip address show | awk "$AWK_ADDRESS_PARSER"
+            ip address show 2>/dev/null | awk "$AWK_ADDRESS_PARSER"
         }
 
         show_interfaces ()
         {
-            ip link show | awk '
+            ip link show 2>/dev/null | awk '
                 /^[0-9]+:/ {
-                    split($2, iface, ":")
-                    print iface[1]
-                }
-            '
-        }
-
-        show_interfaces ()
-        {
-            ip link show | awk '
-                $1 ~ /^[0-9]+:$/ {
-                    sub(/:$/, "", $2)
-                    $1 = $2
-                    {
-                        if ($1 ~ /^[a-z0-9]+$/) {
-                            '"$AWK_UNIQUE_COLLECT"'
-                        }
-                    }
+                    value = $2
+                    sub(/:$/, "", value)
+                    sub(/@.*/, "", value)
+                    '"$AWK_UNIQUE_COLLECT"'
                 }
                 '"$AWK_NATURAL_SORT"'
             '
@@ -1208,38 +1195,41 @@ resolve_dependencies ()
         NET_TOOL="ifconfig"
         show_addresses ()
         {
-            ifconfig -a | awk "$AWK_ADDRESS_PARSER"
+            ifconfig -a 2>/dev/null | awk "$AWK_ADDRESS_PARSER"
         }
 
         show_interfaces ()
         {
-            ifconfig -a | awk '
-                /^[a-zA-Z0-9]/ && !/^[0-9]+:/ {
-                    sub(/:$/, "", $1)
-                    {
-                        if ($1 ~ /^[a-z0-9]+$/) {
-                            '"$AWK_UNIQUE_COLLECT"'
-                        }
-                    }
+            ifconfig -a 2>/dev/null | awk '
+                /^[a-zA-Z0-9]/ {
+                    value = $1
+                    sub(/:$/, "", value)
+                    '"$AWK_UNIQUE_COLLECT"'
                 }
                 '"$AWK_NATURAL_SORT"'
             '
         }
     else
-        say 127 "error: environment: network management tools not found: 'ip|ifconfig'"
+        say 127 "error: environment: network check is impossible: 'ip' or 'ifconfig' not found"
     fi
 
     HAS_PORT_AUDIT="yes"
     show_ports ()
     {
-        netstat -an | awk '
-            $1 ~ /^tcp/ && !/LISTEN/ {
+        netstat -an 2>/dev/null | awk '
+            $1 !~ /^tcp|^udp/ {
                 next
             }
-            $1 ~ /^tcp|^udp/ {
-                split($4, port, "[:.]")
-                $1 = port[length(port)]
-                if ($1 ~ /^[0-9]+$/) {
+
+            $1 ~ /^tcp/ && $6 !~ /LISTEN/ {
+                next
+            }
+
+            {
+                value = $4
+                while (sub(/.*[:.]/, "", value))
+
+                if (value ~ /^[0-9]+$/) {
                     '"$AWK_UNIQUE_COLLECT"'
                 }
             }
@@ -1254,14 +1244,14 @@ resolve_dependencies ()
         then
             show_ports ()
             {
-                ss -Hnuta | awk '
-                    $1 == "tcp" && $2 != "LISTEN" {
+                ss -Hnuta 2>/dev/null | awk '
+                    $1 !~ /^tcp|^udp/ {
                         next
                     }
                     {
-                        split($5, port, ":")
-                        $1 = port[length(port)]
-                        if ($1 ~ /^[0-9]+$/) {
+                        value = $5
+                        sub(/.*:/, "", value)
+                        if (value ~ /^[0-9]+$/) {
                             '"$AWK_UNIQUE_COLLECT"'
                         }
                     }
@@ -1271,17 +1261,15 @@ resolve_dependencies ()
         elif type netstat >/dev/null 2>&1
         then
             :
-        elif is_file /proc/net/tcp  ||
-             is_file /proc/net/tcp6 ||
-             is_file /proc/net/udp  ||
-             is_file /proc/net/udp6
-        then
+        elif
             PROC_NET_TCP=""
             for i in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6
             do
                 is_file $i &&
                     PROC_NET_TCP="${PROC_NET_TCP:+$PROC_NET_TCP }$i" || :
             done
+            is_not_empty "${PROC_NET_TCP:-}"
+        then
             show_ports ()
             {
                 for i in $PROC_NET_TCP
@@ -1313,6 +1301,7 @@ resolve_dependencies ()
                     ' "$i"
                 done | awk '
                     {
+                        value = $1
                         '"$AWK_UNIQUE_COLLECT"'
                     }
                     '"$AWK_NATURAL_SORT"'
@@ -1320,7 +1309,7 @@ resolve_dependencies ()
             }
         else
             HAS_PORT_AUDIT=""
-            say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss|netstat' not found"
+            say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss' or 'netstat' not found"
         fi
     else
         if type netstat >/dev/null 2>&1

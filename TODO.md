@@ -10,7 +10,7 @@
 
 `resolve_dependencies`
 
-- [ ] Поправить код `awk` в переменных `AWK_UNIQUE_COLLECT` и/или `AWK_NATURAL_SORT`, т.е. есть мусор:
+- [X] Поправить код `awk` в переменных `AWK_UNIQUE_COLLECT` и/или `AWK_NATURAL_SORT`, т.е. есть мусор:
 
       ```
       root@OpenWrt:~# show_ports
