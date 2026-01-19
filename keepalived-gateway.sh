@@ -977,11 +977,11 @@ is_sync_enabled ()
         if is_not_empty "${VIRTUAL_PORT:-}"
         then
             is_port_free "$VIRTUAL_PORT" || {
-                say 127 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
+                say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
                 RETURN=1
             }
         else
-            say 127 "error: variable 'VIRTUAL_PORT': $ERROR: check failed"
+            say 2 "error: variable 'VIRTUAL_PORT': $ERROR: check failed"
             RETURN=1
         fi
     else
@@ -990,7 +990,7 @@ is_sync_enabled ()
     fi
 
     is_not_empty "${VIRTUAL_IPADDRESS:-}" || {
-        say 127 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: expected IPv4/IPv6 address"
+        say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: expected IPv4/IPv6 address"
         RETURN=1
     }
 
@@ -1000,7 +1000,7 @@ is_sync_enabled ()
             LOCAL_IP="127.0.0.1"
             BIND_IP="$LOCAL_IP"
         } || {
-            say "error: environment: IPv4 stack is disabled or '127.0.0.1' is missing on lo: cannot host sync server for IPv4"
+            say 1 "error: environment: $ERROR: IPv4 stack or 127.0.0.1 not found"
             RETURN=1
         }
     else
@@ -1008,7 +1008,7 @@ is_sync_enabled ()
             LOCAL_IP="::1"
             BIND_IP="[$LOCAL_IP]"
         } || {
-            say "error: environment: IPv6 stack is disabled or '::1' is missing on lo: cannot host sync server for IPv6"
+            say 1 "error: environment: $ERROR: IPv6 stack or ::1 not found"
             RETURN=1
         }
     fi
@@ -1062,7 +1062,9 @@ resolve_sync_server ()
 
     GATEWAYS_SERVER_DISPATCHER=""
     is_empty "${LOCAL_IP:-}" || {
-        for COMMAND in nc uhttpd httpd telnetd
+        MISSING_DEPS=""
+        SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
+        for COMMAND in $SYNC_SERVER_LIST
         do
             if type "$COMMAND" >/dev/null 2>&1
             then
@@ -1085,11 +1087,11 @@ resolve_sync_server ()
                             SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
                         }
                     ;;
-                esac && break || :
-            fi
+                esac && break
+            fi || MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         done
         is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
-            say 127 "error: environment: no suitable network dispatcher found: install 'nc', 'uhttpd', 'httpd' or 'telnetd'"
+            say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
     }
 }
 
@@ -1391,7 +1393,7 @@ resolve_dependencies ()
         for COMMAND in date wc
         do
             type "$COMMAND" >/dev/null 2>&1 ||
-                MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS|}$COMMAND"
+                MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         done
         is_empty "${MISSING_DEPS:-}" ||
             say 127 "error: variable 'SPEEDTEST': performance test impossible: '$MISSING_DEPS' not found"
