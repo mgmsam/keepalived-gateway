@@ -924,6 +924,23 @@ is_remote_ip ()
     :
 }
 
+probe_stack_capability ()
+{
+    LOCAL_IP="$(show_addresses)"
+
+    case "$LOCAL_IP" in
+        *127.0.0.1*)
+            HAS_IPV4_STACK="yes"
+        ;;
+    esac
+
+    case "$LOCAL_IP" in
+        *"::1"*)
+            HAS_IPV6_STACK="yes"
+            ;;
+    esac
+}
+
 resolve_dependencies ()
 {
     NET_TOOL=""
@@ -1179,23 +1196,36 @@ resolve_dependencies ()
         fi
     fi
 
+    HAS_IPV4_STACK="no"
+    HAS_IPV6_STACK="no"
+
+    is_empty "${NET_TOOL:-}" || probe_stack_capability
+
+    PING_NEEDED="no"
     is_empty "${PING_HOST:-}" && is_equal "$SPEEDTEST" "yes" &&
-    is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
+        is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" ||
+            PING_NEEDED="yes"
+
+    is_equal "$PING_NEEDED" "no" || {
         type ping >/dev/null 2>&1 && {
 
-            ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
-                PING4="ping -4" ||
-                PING4="ping"
+            is_equal "$HAS_IPV4_STACK" yes && {
+                ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
+                    PING4="ping -4" ||
+                    PING4="ping"
+            } || PING4=""
 
-            if ping -6 -c 1 -w 1 ::1
-            then
-                PING6="ping -6"
-            elif type ping6 && ping6 -c 1 -w 1 ::1
-            then
-                PING6="ping6"
-            else
-                PING6=""
-            fi >/dev/null 2>&1
+            is_equal "$HAS_IPV6_STACK" yes && {
+                if ping -6 -c 1 -w 1 ::1
+                then
+                    PING6="ping -6"
+                elif type ping6 && ping6 -c 1 -w 1 ::1
+                then
+                    PING6="ping6"
+                else
+                    PING6=""
+                fi >/dev/null 2>&1
+            } || PING6=""
 
         } || say 127 "error: environment: gateway check impossible: 'ping' not found"
     }
@@ -1217,6 +1247,13 @@ resolve_dependencies ()
         say 127 "error: environment: parsing impossible: 'awk' not found"
     }
 
+    type sleep >/dev/null 2>&1 && SLEEP="sleep" || {
+        SLEEP="return"
+        SAVED_EXIT_CODE="$EXIT_CODE"
+        say "error: environment: continuous monitoring impossible: 'sleep' not found"
+        EXIT_CODE="$SAVED_EXIT_CODE"
+    }
+
     type timeout >/dev/null 2>&1 && {
         timeout -t 1 sh -c : >/dev/null 2>&1 &&
             TIMEOUT="timeout -t" ||
@@ -1226,11 +1263,120 @@ resolve_dependencies ()
         say 127 "error: environment: process hang protection impossible: 'timeout' not found"
     }
 
-    type sleep >/dev/null 2>&1 && SLEEP="sleep" || {
-        SLEEP="return"
-        SAVED_EXIT_CODE="$EXIT_CODE"
-        say "error: environment: continuous monitoring impossible: 'sleep' not found"
-        EXIT_CODE="$SAVED_EXIT_CODE"
+    is_equal "$ROLE" "single" || {
+        is_equal "$SLEEP" return &&
+            say 127 "error: environment: sync server determination impossible: 'sleep' not found" || :
+        is_empty "${TIMEOUT:-}" &&
+            say 127 "error: environment: sync server determination impossible: 'timeout' not found" || :
+        is_empty "${VIRTUAL_IPADDRESS_IPV4:-${VIRTUAL_IPADDRESS_IPV6:-}}" &&
+            say 127 "error: variable 'VIRTUAL_IPADDRESS': sync server determination impossible: expected IPv4/IPv6 [with CIDR]"
+    } || {
+
+        LOCAL_IP=""
+
+        is_empty "${VIRTUAL_IPADDRESS_IPV6:-}" || {
+            is_equal "$HAS_IPV6_STACK" "yes" && {
+                LOCAL_IP="::1"
+                BIND_IP="[$LOCAL_IP]"
+            } || say "error: environment: IPv6 stack is disabled or '::1' is missing on lo: cannot host sync server for IPv6"
+        }
+
+        is_empty "${VIRTUAL_IPADDRESS_IPV4:-}" || {
+            is_equal "$HAS_IPV4_STACK" "yes" && {
+                LOCAL_IP="127.0.0.1"
+                BIND_IP="$LOCAL_IP"
+            } || say "error: environment: IPv4 stack is disabled or '127.0.0.1' is missing on lo: cannot host sync server for IPv4"
+        }
+
+        check_daemon ()
+        {
+            $@ >&2 &
+            COMMAND_PID=$!
+            sleep 1
+            if kill -0 "$COMMAND_PID"
+            then
+                kill "$COMMAND_PID"
+                wait "$COMMAND_PID"
+                GATEWAYS_SERVER_DISPATCHER="serve_gateways_$1"
+                return 0
+            fi 2>/dev/null
+            return 1
+        }
+
+        is_netcat_server_capable ()
+        {
+            case "${NETCAT_STAT:-}" in
+                *not_a_port*)
+                    case "$NETCAT_STAT" in
+                        *[uU]sage*)
+                        ;;
+                        *)
+                            return
+                        ;;
+                    esac
+                ;;
+            esac
+            return 1
+        }
+
+        detect_netcat_server ()
+        {
+            NETCAT=""
+            check_daemon nc -l -p 0 || check_daemon nc -l $LOCAL_IP 0
+
+            NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
+            if is_netcat_server_capable
+            then
+                NETCAT="nc -l -p"
+                return
+            fi
+
+            NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
+            if is_netcat_server_capable
+            then
+                NETCAT="nc -l"
+                return
+            fi
+
+            return 1
+        }
+
+        GATEWAYS_SERVER_DISPATCHER=""
+        is_empty "${LOCAL_IP:-}" || {
+            for COMMAND in uhttpd httpd mini_httpd mini-httpd telnetd nc
+            do
+                if type "$COMMAND" >/dev/null 2>&1
+                then
+                    case "$COMMAND" in
+                        uhttpd | httpd)
+                            check_daemon $COMMAND -p $BIND_IP:0 -f
+                        ;;
+                        mini_httpd | mini-httpd)
+                            check_daemon $COMMAND -p $BIND_IP:0 -D
+                        ;;
+                        telnetd)
+                            check_daemon $COMMAND -p 0 -b $LOCAL_IP -F
+                        ;;
+                        nc)
+                            # в процессе
+                        ;;
+                    esac && break || :
+                fi
+            done
+            is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+                say 127 "error: environment: ..."
+        }
+    }
+
+    is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
+        # web-client
+        for COMMAND in wget curl nc
+        do
+            if type "$COMMAND" >/dev/null 2>&1
+            then
+
+            fi
+        done
     }
 }
 
@@ -1593,42 +1739,6 @@ is_port_free ()
             exit 0
         }
     '
-}
-
-is_netcat_server_capable ()
-{
-    case "${NETCAT_STAT:-}" in
-        *not_a_port*)
-            case "$NETCAT_STAT" in
-                *[uU]sage*)
-                ;;
-                *)
-                    return
-                ;;
-            esac
-        ;;
-    esac
-    return 1
-}
-
-detect_netcat_server ()
-{
-    NETCAT=""
-    NETCAT_STAT="$($TIMEOUT 3 nc -l -p not_a_port 2>&1 || :)"
-    if is_netcat_server_capable
-    then
-        NETCAT="nc -l -p"
-        return
-    fi
-
-    NETCAT_STAT="$($TIMEOUT 3 nc -l not_a_port 2>&1 || :)"
-    if is_netcat_server_capable
-    then
-        NETCAT="nc -l"
-        return
-    fi
-
-    return 1
 }
 
 detect_sync_transport ()
