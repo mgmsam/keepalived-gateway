@@ -839,7 +839,7 @@ set_variables ()
         ;;
         *)
             ROLE="single"
-            say 2 "error: variable 'ROLE': must be 'master, master-advisor, single, slave'"
+            say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
         ;;
     esac
 
@@ -1123,7 +1123,7 @@ resolve_dependencies ()
                 MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         done
         is_empty "${MISSING_DEPS:-}" ||
-            say 127 "error: variable 'SPEEDTEST': performance test impossible: '$MISSING_DEPS' not found"
+            say 127 "error: environment: speedtest is impossible: '$MISSING_DEPS' not found"
     }
 
     type awk >/dev/null 2>&1 ||
@@ -1251,7 +1251,7 @@ is_local_ip ()
     return 1
 }
 
-verify_gateways_remote ()
+verify_gateway_remote ()
 {
     IFS="="
     set -- $GATEWAY
