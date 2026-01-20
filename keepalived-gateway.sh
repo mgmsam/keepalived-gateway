@@ -1026,7 +1026,12 @@ resolve_dependencies ()
 
     if is_equal "${NET_TOOL:-}" "ip"
     then
-        is_equal "$ROLE" "single" ||
+        case "$ROLE" in
+            single | slave)
+            ;;
+            *)
+                false
+        esac ||
         if type ss >/dev/null 2>&1
         then
             show_ports ()
@@ -1405,10 +1410,11 @@ verify_network_state ()
 
 is_sync_enabled ()
 {
-    if is_equal "$ROLE" "single"
-    then
-        return 0
-    fi
+    case "$ROLE" in
+        single | slave)
+            return 0
+        ;;
+    esac
 
     RETURN=0
     ERROR="sync server determination impossible"
