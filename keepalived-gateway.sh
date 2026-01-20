@@ -110,6 +110,7 @@ say ()
 {
     EXIT_CODE=$?
     CONTINUE=""
+    NO_PREFIX=""
     USE_ESC="yes"
     while is_diff $# 0
     do
@@ -120,6 +121,9 @@ say ()
             -n)
                 CONTINUE="-n"
             ;;
+            -p)
+                NO_PREFIX="yes"
+            ;;
             "" | *[!0123456789]*)
                 break
             ;;
@@ -129,7 +133,17 @@ say ()
         esac
         shift
     done
-    is_empty "$*" || puts "${LOG_PREFIX:-$0: }${1:+$*}"
+    is_empty "$*" || {
+        case "${NO_PREFIX:-}" in
+            "")
+                puts "${LOG_PREFIX:-$0: }${1:+$*}"
+            ;;
+            *)
+                puts "${1:+$*}"
+            ;;
+        esac
+        CONTINUE=""
+    }
 }
 
 die ()
@@ -1433,8 +1447,6 @@ is_sync_enabled ()
 
 resolve_sync_server ()
 {
-    LOCAL_IP=""
-
     check_daemon ()
     {
         $@ >&2 &
@@ -1476,38 +1488,42 @@ resolve_sync_server ()
     }
 
     GATEWAYS_SERVER_DISPATCHER=""
-    is_empty "${LOCAL_IP:-}" || {
-        MISSING_DEPS=""
-        SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
-        for COMMAND in $SYNC_SERVER_LIST
-        do
-            if type "$COMMAND" >/dev/null 2>&1
-            then
-                case "$COMMAND" in
-                    nc)
-                        detect_netcat_server &&
-                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
-                    ;;
-                    uhttpd | httpd)
-                        check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
-                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
-                            is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
-                                SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
-                                SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
-                        }
-                    ;;
-                    telnetd)
-                        check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
-                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
-                            SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
-                        }
-                    ;;
-                esac && break
-            fi || MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
-        done
-        is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
-            say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
-    }
+    MISSING_DEPS=""
+    SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
+    for COMMAND in $SYNC_SERVER_LIST
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            say -n "environment: role '$ROLE': found '$COMMAND': probing server capability..."
+            case "$COMMAND" in
+                nc)
+                    detect_netcat_server &&
+                        GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
+                ;;
+                uhttpd | httpd)
+                    check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
+                        GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
+                        is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
+                            SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
+                            SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
+                    }
+                ;;
+                telnetd)
+                    check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
+                        GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
+                        SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
+                    }
+                ;;
+            esac >/dev/null 2>&1 && {
+                say -p " [ OK ]"
+                break
+            }
+        else
+            MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
+        fi || say 0 -p " [ FAILED ]"
+    done
+    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+        say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
 }
 
 select_web_tools ()
@@ -1515,6 +1531,7 @@ select_web_tools ()
     if is_sync_enabled
     then
         resolve_sync_server
+        echo_conf_vars resolve_sync_server
     fi
 
     is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
@@ -1577,6 +1594,10 @@ VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
             METRICS_IPV4 [$METRICS_IPV4]
             METRICS_IPV6 [$METRICS_IPV6]
                   IFACES [$IFACES]
+
+ =========== Web Server
+GATEWAYS_SERVER_DISPATCHER [$GATEWAYS_SERVER_DISPATCHER]
+                    SERVER [$SERVER]
  ---------------------------------------------------"
 }
 
@@ -2479,6 +2500,7 @@ main ()
         echo_conf_vars verify_network_state
         die
     }
+    select_web_tools
     exit
     check_permissions
     is_equal $EXIT_CODE 0 || die
