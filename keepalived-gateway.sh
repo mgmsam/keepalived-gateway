@@ -247,12 +247,15 @@ is_metric ()
             return 2
         ;;
         *)
-            test "$1" -le 4294967295 || {
-                ERROR="exceeds 32-bit limit"
-                return 3
-            }
-        ;;
     esac
+
+    METRIC="${1#"${1%%[!0]*}"}"
+
+    test ${#METRIC} -ge 10 || return 0
+    test ${#METRIC} -le 10 && test "$METRIC" \< 4294967296 || {
+        ERROR="exceeds 32-bit limit"
+        return 3
+    }
 }
 
 is_ipv4 ()
@@ -761,10 +764,8 @@ set_variables ()
             say 2 "error: variable 'INTERFACE': $ERROR"
     }
 
-    is_metric "${METRIC:=0}" && {
-        METRIC="${METRIC#"${METRIC%%[!0]*}"}"
-        DEFAULT_METRIC="${METRIC:-}"
-    } || say 2 "error: variable 'METRIC': route metric $ERROR"
+    is_metric "${METRIC:-0}" && DEFAULT_METRIC="${METRIC:-}" ||
+        say 2 "error: variable 'METRIC': route metric $ERROR"
 
     is_not_empty "${GATEWAYS:-}" && {
         case "${GATEWAYS:-}" in
