@@ -761,7 +761,8 @@ format_duration ()
 set_variables ()
 {
     is_empty "${INTERFACE:-}" || {
-        is_interface "$INTERFACE" && DEFAULT_INTERFACE="$INTERFACE" ||
+        DEFAULT_INTERFACE="$INTERFACE"
+        is_interface "$INTERFACE" ||
             say 2 "error: variable 'INTERFACE': $ERROR"
     }
 
