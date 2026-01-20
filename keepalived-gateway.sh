@@ -1369,13 +1369,17 @@ verify_network_state ()
     }
 
     is_empty "${PING_HOST:-}" || {
-        is_empty "${PING_FQDN:-}" || resolve_fqdn "$PING_FQDN" ||
-            say "error: variable 'PING_HOST': $ERROR"
+        is_empty "${PING_FQDN:-}" || resolve_fqdn "$PING_FQDN" && {
+            PING_IPV4="${IPV4:-}"
+            PING_IPV6="${IPV6:-}"
+        } || say "error: variable 'PING_HOST': $ERROR"
     }
 
     is_equal "$SPEEDTEST" "no" || {
-        is_empty "${SPEEDTEST_FQDN:-}" || resolve_fqdn "$SPEEDTEST_FQDN" ||
-            say "error: variable 'SPEEDTEST_HOST': $ERROR"
+        is_empty "${SPEEDTEST_FQDN:-}" || resolve_fqdn "$SPEEDTEST_FQDN" && {
+            SPEEDTEST_IPV4="${IPV4:-}"
+            SPEEDTEST_IPV6="${IPV6:-}"
+        } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
 
     LOCAL_IP=""
@@ -1516,10 +1520,58 @@ select_web_tools ()
         do
             if type "$COMMAND" >/dev/null 2>&1
             then
-
+                echo "client: $COMMAND"
             fi
         done
     }
+}
+
+echo_conf_vars ()
+{
+    echo " =========== Config
+               INTERFACE [$INTERFACE]
+                  METRIC [$METRIC]
+                GATEWAYS [$GATEWAYS]
+          CHECK_INTERVAL [$CHECK_INTERVAL]
+               PING_HOST [$PING_HOST]
+               SPEEDTEST [$SPEEDTEST]
+          SPEEDTEST_HOST [$SPEEDTEST_HOST]
+         SPEEDTEST_SCOPE [$SPEEDTEST_SCOPE]
+                    ROLE [$ROLE]
+       VIRTUAL_IPADDRESS [$VIRTUAL_IPADDRESS]
+            VIRTUAL_PORT [$VIRTUAL_PORT]
+ =========== VARS
+        SPEEDTEST_SCHEME [$SPEEDTEST_SCHEME]
+          SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
+          SPEEDTEST_IPV4 [$SPEEDTEST_IPV4]
+          SPEEDTEST_IPV6 [$SPEEDTEST_IPV6]
+                RESOURCE [$RESOURCE]
+    SPEEDTEST_URL_PREFIX [$SPEEDTEST_URL_PREFIX]
+          SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
+
+               PING_FQDN [$PING_FQDN]
+               PING_IPV4 [$PING_IPV4]
+               PING_IPV6 [$PING_IPV6]
+             PING_NEEDED [$PING_NEEDED]
+                   PING4 [$PING4]
+                   PING6 [$PING6]
+
+VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
+
+                NET_TOOL [$NET_TOOL]
+          HAS_IPV4_STACK [$HAS_IPV4_STACK]
+          HAS_IPV6_STACK [$HAS_IPV6_STACK]
+                   SLEEP [$SLEEP]
+                 TIMEOUT [$TIMEOUT]
+            PROC_NET_TCP [$PROC_NET_TCP]
+                LOCAL_IP [$LOCAL_IP]
+ =========== IP
+           GATEWAYS_IPV4 [$GATEWAYS_IPV4]
+           GATEWAYS_IPV6 [$GATEWAYS_IPV6]
+            METRICS_IPV4 [$METRICS_IPV4]
+            METRICS_IPV6 [$METRICS_IPV6]
+                  IFACES [$IFACES]
+ ---------------------------------------------------"
 }
 
 deprecated_check_base_dependencies ()
@@ -2414,6 +2466,8 @@ main ()
     include_config && set_variables
     resolve_dependencies &&
     verify_network_state || die
+    echo_conf_vars
+    exit
     check_permissions
     is_equal $EXIT_CODE 0 || die
 
