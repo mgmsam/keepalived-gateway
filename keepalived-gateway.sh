@@ -801,8 +801,8 @@ set_variables ()
             SPEEDTEST=yes
         ;;
         *)
-            say 2 "error: variable 'SPEEDTEST': must be 'yes|no'"
             SPEEDTEST=no
+            say 2 "error: variable 'SPEEDTEST': must be 'yes' or 'no'"
         ;;
     esac
 
@@ -835,14 +835,14 @@ set_variables ()
         cluster | master | master-advisor | single | slave)
         ;;
         *)
-            say 2 "error: variable 'ROLE': must be 'master|master-advisor|single|slave'"
             ROLE="single"
+            say 2 "error: variable 'ROLE': must be 'master, master-advisor, single, slave'"
         ;;
     esac
 
     is_empty "${VIRTUAL_IPADDRESS:-}" && {
         is_equal "$ROLE" "single" ||
-            say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster|master|master-advisor|slave'"
+            say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster, master, master-advisor, slave'"
     } || {
         parse_resource "$VIRTUAL_IPADDRESS" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
@@ -859,239 +859,10 @@ set_variables ()
 
     is_empty "${VIRTUAL_PORT:-}" && {
         is_equal "$ROLE" "single" ||
-            say 2 "error: variable 'VIRTUAL_PORT' is empty: required for roles 'cluster|master|master-advisor|slave'"
+            say 2 "error: variable 'VIRTUAL_PORT': is empty: required for roles 'cluster, master, master-advisor, slave'"
     } || is_port "$VIRTUAL_PORT" || {
-        say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
         VIRTUAL_PORT=""
-    }
-}
-
-get_local_ip ()
-{
-    case "${1:-}" in
-        -4 | 4 | inet)
-            set -- "inet" ${2:-}
-        ;;
-        -6 | 6 | inet6)
-            set -- "inet6" ${2:-}
-        ;;
-        *)
-            set -- "inet6?" ${2:-}
-        ;;
-    esac
-    ip address show | awk '
-        $1 ~ /^'"$1"'$/ {
-            if ("'"${2:-}"'" == "mask") {
-                print $2
-            } else {
-                split($2, ip, "/")
-                print ip[1]
-            }
-        }
-    '
-}
-
-is_local_ip ()
-{
-    case "${1:-}" in
-        "")
-            return 1
-        ;;
-        */*)
-            set -- "$1" "${2:-}" mask
-        ;;
-        *)
-            set -- "$1" "${2:-}"
-        ;;
-    esac
-    get_local_ip "${2:-}" ${3:-} | awk '
-        $0 == "'"$1"'" {
-            found = "yes"
-            exit
-        }
-        END {
-            if (found == "yes") exit 0
-            exit 1
-        }
-    '
-}
-
-is_remote_ip ()
-{
-    :
-}
-
-probe_stack_capability ()
-{
-    LOCAL_IP="$(show_addresses)"
-
-    case "$LOCAL_IP" in
-        *127.0.0.1*)
-            HAS_IPV4_STACK="yes"
-        ;;
-    esac
-
-    case "$LOCAL_IP" in
-        *"::1"*)
-            HAS_IPV6_STACK="yes"
-            ;;
-    esac
-}
-
-is_port_free ()
-{
-    show_ports | awk '
-        $1 ~ /^'"$1"'$/ {
-            found = "yes"
-            exit
-        }
-        END {
-            if (found == "yes") exit 1
-            exit 0
-        }
-    '
-}
-
-is_sync_enabled ()
-{
-    if is_equal "$ROLE" "single"
-    then
-        return 0
-    fi
-
-    RETURN=0
-    ERROR="sync server determination impossible"
-
-    is_equal "$SLEEP" "sleep" || {
-        say 127 "error: environment: $ERROR: 'sleep' not found"
-        RETURN=1
-    }
-
-    is_not_empty "${TIMEOUT:-}" || {
-        say 127 "error: environment: $ERROR: 'timeout' not found"
-        RETURN=1
-    }
-
-    if is_not_empty "${HAS_PORT_AUDIT:-}"
-    then
-        if is_not_empty "${VIRTUAL_PORT:-}"
-        then
-            is_port_free "$VIRTUAL_PORT" || {
-                say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
-                RETURN=1
-            }
-        else
-            say 2 "error: variable 'VIRTUAL_PORT': $ERROR: check failed"
-            RETURN=1
-        fi
-    else
-        say 127 "error: environment: $ERROR: 'ss' or 'netstat' not found"
-        RETURN=1
-    fi
-
-    is_not_empty "${VIRTUAL_IPADDRESS:-}" || {
-        say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR: expected IPv4/IPv6 address"
-        RETURN=1
-    }
-
-    if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
-    then
-        is_equal "$HAS_IPV4_STACK" "yes" && {
-            LOCAL_IP="127.0.0.1"
-            BIND_IP="$LOCAL_IP"
-        } || {
-            say 1 "error: environment: $ERROR: IPv4 stack or 127.0.0.1 not found"
-            RETURN=1
-        }
-    else
-        is_equal "$HAS_IPV6_STACK" "yes" && {
-            LOCAL_IP="::1"
-            BIND_IP="[$LOCAL_IP]"
-        } || {
-            say 1 "error: environment: $ERROR: IPv6 stack or ::1 not found"
-            RETURN=1
-        }
-    fi
-
-    return $RETURN
-}
-
-resolve_sync_server ()
-{
-    LOCAL_IP=""
-
-    check_daemon ()
-    {
-        $@ >&2 &
-        COMMAND_PID=$!
-        sleep 1
-        if kill -0 "$COMMAND_PID"
-        then
-            kill "$COMMAND_PID"
-            wait "$COMMAND_PID"
-            return 0
-        fi 2>/dev/null
-        return 1
-    }
-
-    detect_netcat_server ()
-    {
-        # Debian
-        if check_daemon nc -l -p $VIRTUAL_PORT $LOCAL_IP
-        then
-            SERVER="nc -l -p $VIRTUAL_PORT $VIRTUAL_IPADDRESS"
-            return 0
-        fi
-
-        # Ubuntu
-        if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
-        then
-            SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
-            return 0
-        fi
-
-        # FreeBSD
-        if check_daemon nc -l $LOCAL_IP $VIRTUAL_PORT
-        then
-            SERVER="nc -l $VIRTUAL_IPADDRESS $VIRTUAL_PORT"
-            return 0
-        fi
-
-        return 1
-    }
-
-    GATEWAYS_SERVER_DISPATCHER=""
-    is_empty "${LOCAL_IP:-}" || {
-        MISSING_DEPS=""
-        SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
-        for COMMAND in $SYNC_SERVER_LIST
-        do
-            if type "$COMMAND" >/dev/null 2>&1
-            then
-                case "$COMMAND" in
-                    nc)
-                        detect_netcat_server &&
-                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
-                    ;;
-                    uhttpd | httpd)
-                        check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
-                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
-                            is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
-                                SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
-                                SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
-                        }
-                    ;;
-                    telnetd)
-                        check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
-                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
-                            SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
-                        }
-                    ;;
-                esac && break
-            fi || MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
-        done
-        is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
-            say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
+        say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
     }
 }
 
@@ -1213,7 +984,6 @@ resolve_dependencies ()
         say 127 "error: environment: network check is impossible: 'ip' or 'ifconfig' not found"
     fi
 
-    HAS_PORT_AUDIT="yes"
     show_ports ()
     {
         netstat -an 2>/dev/null | awk '
@@ -1308,10 +1078,10 @@ resolve_dependencies ()
                 '
             }
         else
-            HAS_PORT_AUDIT=""
             say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss' or 'netstat' not found"
         fi
-    else
+    elif is_equal "${NET_TOOL:-}" "ifconfig"
+    then
         if type netstat >/dev/null 2>&1
         then
             show_routes ()
@@ -1319,7 +1089,6 @@ resolve_dependencies ()
                 netstat -rn
             }
         else
-            HAS_PORT_AUDIT=""
             say 127 "error: environment: routing table check impossible: 'netstat' not found"
         fi
 
@@ -1342,40 +1111,6 @@ resolve_dependencies ()
         fi
     fi
 
-    HAS_IPV4_STACK="no"
-    HAS_IPV6_STACK="no"
-
-    is_empty "${NET_TOOL:-}" || probe_stack_capability
-
-    PING_NEEDED="no"
-    is_empty "${PING_HOST:-}" && is_equal "$SPEEDTEST" "yes" &&
-        is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" ||
-            PING_NEEDED="yes"
-
-    is_equal "$PING_NEEDED" "no" || {
-        type ping >/dev/null 2>&1 && {
-
-            is_equal "$HAS_IPV4_STACK" yes && {
-                ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
-                    PING4="ping -4" ||
-                    PING4="ping"
-            } || PING4=""
-
-            is_equal "$HAS_IPV6_STACK" yes && {
-                if ping -6 -c 1 -w 1 ::1
-                then
-                    PING6="ping -6"
-                elif type ping6 && ping6 -c 1 -w 1 ::1
-                then
-                    PING6="ping6"
-                else
-                    PING6=""
-                fi >/dev/null 2>&1
-            } || PING6=""
-
-        } || say 127 "error: environment: gateway check impossible: 'ping' not found"
-    }
-
     is_equal "$SPEEDTEST" "no" || {
 
         MISSING_DEPS=""
@@ -1388,10 +1123,8 @@ resolve_dependencies ()
             say 127 "error: variable 'SPEEDTEST': performance test impossible: '$MISSING_DEPS' not found"
     }
 
-    type awk >/dev/null 2>&1 && AWK="yes" || {
-        AWK=""
+    type awk >/dev/null 2>&1 ||
         say 127 "error: environment: parsing impossible: 'awk' not found"
-    }
 
     type sleep >/dev/null 2>&1 && SLEEP="sleep" || {
         SLEEP="return"
@@ -1404,26 +1137,60 @@ resolve_dependencies ()
         timeout -t 1 sh -c : >/dev/null 2>&1 &&
             TIMEOUT="timeout -t" ||
             TIMEOUT="timeout"
-    } || {
-        TIMEOUT=""
-        say 127 "error: environment: process hang protection impossible: 'timeout' not found"
-    }
+    } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    if is_sync_enabled
-    then
-        resolve_sync_server
-    fi
-
-    is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
-        # web-client
-        for COMMAND in wget curl nc
+    HAS_IPV4_STACK="no"
+    HAS_IPV6_STACK="no"
+    is_empty "${NET_TOOL:-}" || {
+        for LOCAL_IP in $(show_addresses)
         do
-            if type "$COMMAND" >/dev/null 2>&1
-            then
-
-            fi
+            case "$LOCAL_IP" in
+                127.0.0.1)
+                    HAS_IPV4_STACK="yes"
+                ;;
+                ::1)
+                    HAS_IPV6_STACK="yes"
+                ;;
+            esac
+            is_equal "$HAS_IPV4_STACK" "no" ||
+            is_equal "$HAS_IPV6_STACK" "no" || break
         done
     }
+
+    PING_NEEDED="no"
+    is_empty "${PING_HOST:-}" && is_equal "$SPEEDTEST" "yes" &&
+        is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" ||
+            PING_NEEDED="yes"
+
+    PING4=""
+    PING6=""
+    is_equal "$PING_NEEDED" "no" || {
+        type ping >/dev/null 2>&1 && {
+
+            if is_equal "$HAS_IPV4_STACK" yes
+            then
+                ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
+                    PING4="ping -4" ||
+                    PING4="ping"
+            fi
+
+            if is_equal "$HAS_IPV6_STACK" yes
+            then
+                if ping -6 -c 1 -w 1 ::1
+                then
+                    PING6="ping -6"
+                elif type ping6 && ping6 -c 1 -w 1 ::1
+                then
+                    PING6="ping6"
+                else
+                    PING6=""
+                fi >/dev/null 2>&1
+            fi
+
+        } || say 127 "error: environment: gateway check impossible: 'ping' not found"
+    }
+
+    is_equal $EXIT_CODE 0
 }
 
 optimize_gateways ()
@@ -1471,112 +1238,287 @@ $1
 EOF
 }
 
+is_local_ip ()
+{
+    is_not_empty "${1:-}" || return 1
+    for IP in ${LOCAL_IP:-$(show_addresses)}
+    do
+        is_diff "$IP" "$1" || return 0
+    done
+    return 1
+}
+
 verify_gateways_remote ()
 {
-    FAMILY="$1"
     IFS="="
-    set -- $2
+    set -- $GATEWAY
     IFS="$POSIX_IFS"
 
     case "${1:-}" in
         *[.:]*)
-            INTERFACE=
             GATEWAY="$1"
-            METRIC="${2:-}"
         ;;
         *)
-            INTERFACE="$1"
             GATEWAY="$2"
-            METRIC="${3:-}"
         ;;
     esac
 
-    is_remote_ip "$FAMILY" "$GATEWAY" || {
+    if is_local_ip "$GATEWAY"
+    then
         ERROR="address is assigned to this host (loopback risk): $GATEWAY"
         return 2
-    }
+    fi
 }
 
-resolve_ips ()
+resolve_fqdn ()
 {
-    IPV4="$($TIMEOUT 5 $PING4 -c 3 "$1" 2>/dev/null | awk '
-        /PING/ {
-            split($0, a, /[()]/)
-            print a[2]
-            exit
-        }
-    ')" || :
-
-    is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 5 $PING6 -c 3 "$1" 2>/dev/null | awk '
+    is_empty "${PING4:-}" ||
+        IPV4="$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
-                split($0, a, /[()]/)
-                print a[2]
-                exit
+                gsub(/[][)(:]/, " ", $0)
+                for (ip=1; ip<=NF; ip++) {
+                    if ($ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                        print $ip
+                        exit
+                    }
+                }
             }
         ')" || :
 
-    is_empty "${IPV4:+"${IPV6:-}"}" && is_file "/etc/hosts" || return 0
-
-    is_not_empty "${IPV4:-}" ||
-        IPV4=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /\./) {
-                        print $1
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
+            /PING/ {
+                gsub(/[][)(]/, " ")
+                for (ip=1; ip<=NF; ip++) {
+                    sub(/:$/, "", $ip)
+                    if ($ip ~ /^[0-9a-fA-F:]+$/ && $ip ~ /:/) {
+                        print $ip
                         exit
                     }
                 }
             }
-        ' /etc/hosts)
+        ')" || :
 
-    is_not_empty "${IPV6:-}" ||
-        IPV6=$(awk '
-            /^[ \t]*[^#]/ {
-                for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                    if ($1 ~ /:/) {
-                        print $1
-                        exit
+    if is_empty "${IPV4:+${IPV6:-}}" && is_file "/etc/hosts"
+    then
+        is_not_empty "${IPV4:-}" ||
+            IPV4=$(awk '
+                /^[ \t]*[^#]/ {
+                    for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                        if ($1 ~ /\./) {
+                            print $1
+                            exit
+                        }
                     }
                 }
-            }
-        ' /etc/hosts)
+            ' /etc/hosts)
+
+        is_not_empty "${IPV6:-}" ||
+            IPV6=$(awk '
+                /^[ \t]*[^#]/ {
+                    for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                        if ($1 ~ /:/) {
+                            print $1
+                            exit
+                        }
+                    }
+                }
+            ' /etc/hosts)
+    fi
+
+    is_not_empty "${IPV4:-${IPV6:-}}" || {
+        ERROR="failed to resolve FQDN to IP address: $1"
+        return 1
+    }
+}
+
+is_port_free ()
+{
+    show_ports | awk '
+        $1 ~ /^'"$1"'$/ {
+            found = "yes"
+            exit
+        }
+        END {
+            if (found == "yes") exit 1
+            exit 0
+        }
+    '
 }
 
 verify_network_state ()
 {
+    LOCAL_IP="$(show_addresses)"
+
     is_empty "${GATEWAYS_IPV4:-}" || {
         GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
         for GATEWAY in $GATEWAYS_IPV4
         do
-            verify_gateway_remote "$GATEWAY" "IPv4" ||
+            verify_gateway_remote ||
                 say "error: variable 'GATEWAYS': IPv4 $ERROR"
         done
     }
 
     is_empty "${GATEWAYS_IPV6:-}" || {
         GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
-        for GATEWAY in ${GATEWAYS_IPV6:-}
+        for GATEWAY in $GATEWAYS_IPV6
         do
-            verify_gateway_remote "$GATEWAY" "IPv6" ||
+            verify_gateway_remote ||
                 say "error: variable 'GATEWAYS': IPv6 $ERROR"
         done
     }
 
     is_empty "${PING_HOST:-}" || {
-        is_empty "${PING_FQDN:-}" || resolve_ips "$PING_FQDN" ||
+        is_empty "${PING_FQDN:-}" || resolve_fqdn "$PING_FQDN" ||
             say "error: variable 'PING_HOST': $ERROR"
     }
 
     is_equal "$SPEEDTEST" "no" || {
-        is_empty "${SPEEDTEST_FQDN:-}" || resolve_ips "$SPEEDTEST_FQDN" ||
+        is_empty "${SPEEDTEST_FQDN:-}" || resolve_fqdn "$SPEEDTEST_FQDN" ||
             say "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
 
-    is_equal "$ROLE" "single" || {
-        is_empty "${VIRTUAL_PORT:-}" ||
-            is_port_free "$VIRTUAL_PORT" ||
-                say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
+    LOCAL_IP=""
+    is_equal $EXIT_CODE 0
+}
+
+is_sync_enabled ()
+{
+    if is_equal "$ROLE" "single"
+    then
+        return 0
+    fi
+
+    RETURN=0
+    ERROR="sync server determination impossible"
+
+    is_equal "$SLEEP" "sleep" || {
+        RETURN=1
+        say 127 "error: environment: $ERROR: 'sleep' not found"
+    }
+
+    if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
+    then
+        is_equal "$HAS_IPV4_STACK" "yes" && {
+            LOCAL_IP="127.0.0.1"
+            BIND_IP="$LOCAL_IP"
+        } || {
+            RETURN=1
+            say 1 "error: environment: $ERROR: IPv4 stack or 127.0.0.1 not found"
+        }
+    else
+        is_equal "$HAS_IPV6_STACK" "yes" && {
+            LOCAL_IP="::1"
+            BIND_IP="[$LOCAL_IP]"
+        } || {
+            RETURN=1
+            say 1 "error: environment: $ERROR: IPv6 stack or ::1 not found"
+        }
+    fi
+
+    is_port_free "$VIRTUAL_PORT" || {
+        RETURN=1
+        say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
+    }
+
+    return $RETURN
+}
+
+resolve_sync_server ()
+{
+    LOCAL_IP=""
+
+    check_daemon ()
+    {
+        $@ >&2 &
+        COMMAND_PID=$!
+        sleep 1
+        if kill -0 "$COMMAND_PID"
+        then
+            kill "$COMMAND_PID"
+            wait "$COMMAND_PID"
+            return 0
+        fi 2>/dev/null
+        return 1
+    }
+
+    detect_netcat_server ()
+    {
+        # Debian
+        if check_daemon nc -l -p $VIRTUAL_PORT $LOCAL_IP
+        then
+            SERVER="nc -l -p $VIRTUAL_PORT $VIRTUAL_IPADDRESS"
+            return 0
+        fi
+
+        # Ubuntu
+        if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
+        then
+            SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
+            return 0
+        fi
+
+        # FreeBSD
+        if check_daemon nc -l $LOCAL_IP $VIRTUAL_PORT
+        then
+            SERVER="nc -l $VIRTUAL_IPADDRESS $VIRTUAL_PORT"
+            return 0
+        fi
+
+        return 1
+    }
+
+    GATEWAYS_SERVER_DISPATCHER=""
+    is_empty "${LOCAL_IP:-}" || {
+        MISSING_DEPS=""
+        SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
+        for COMMAND in $SYNC_SERVER_LIST
+        do
+            if type "$COMMAND" >/dev/null 2>&1
+            then
+                case "$COMMAND" in
+                    nc)
+                        detect_netcat_server &&
+                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
+                    ;;
+                    uhttpd | httpd)
+                        check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
+                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
+                            is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
+                                SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
+                                SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
+                        }
+                    ;;
+                    telnetd)
+                        check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
+                            GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
+                            SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
+                        }
+                    ;;
+                esac && break
+            fi || MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
+        done
+        is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+            say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
+    }
+}
+
+select_web_tools ()
+{
+    if is_sync_enabled
+    then
+        resolve_sync_server
+    fi
+
+    is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
+        # web-client
+        for COMMAND in wget curl nc
+        do
+            if type "$COMMAND" >/dev/null 2>&1
+            then
+
+            fi
+        done
     }
 }
 
@@ -2470,8 +2412,8 @@ main ()
     setup_core_env
     say "loading configuration..."
     include_config && set_variables
-    resolve_dependencies
-    verify_network_state
+    resolve_dependencies &&
+    verify_network_state || die
     check_permissions
     is_equal $EXIT_CODE 0 || die
 
