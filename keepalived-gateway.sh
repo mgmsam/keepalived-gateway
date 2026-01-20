@@ -189,6 +189,7 @@ setup_core_env ()
     CR="$(puts "\r")"
     TAB="$(puts "\t")"
     SPACE=" "
+    BLANK="$SPACE$TAB"
     POSIX_IFS="$SPACE$TAB$LF"
     IFS="$POSIX_IFS"
 }
@@ -550,8 +551,8 @@ parse_resource ()
     FAMILY=""
 
     HOST="$1"
-    HOST="${HOST#"${HOST%%[![:blank:]]*}"}"
-    HOST="${HOST%"${HOST##*[![:blank:]]}"}"
+    HOST="${HOST#${HOST%%[!$BLANK]*}}"
+    HOST="${HOST%${HOST##*[!$BLANK]}}"
     case "$HOST" in
         *://*)
             SCHEME="${HOST%%://*}"
@@ -609,7 +610,7 @@ parse_resource ()
                     ERROR="user contains illegal shell characters, use URL encoding"
                     return 3
                 ;;
-                *[[:blank:]]*)
+                *[$BLANK]*)
                     ERROR="user: spaces are not allowed, use URL encoding"
                     return 4
                 ;;
@@ -625,7 +626,7 @@ parse_resource ()
                     ERROR="password contains illegal URL delimiters, use URL encoding"
                     return 6
                 ;;
-                *[[:blank:]]*)
+                *[$BLANK]*)
                     ERROR="password: spaces are not allowed, use URL encoding"
                     return 7
                 ;;
@@ -769,10 +770,10 @@ set_variables ()
 
     is_not_empty "${GATEWAYS:-}" && {
         case "${GATEWAYS:-}" in
-            *[!][[:blank:]a-zA-Z0-9.:_=,-]*)
+            *[!][a-zA-Z0-9$BLANK.:_=,-]*)
                 say 2 "error: variable 'GATEWAYS': contains forbidden characters"
             ;;
-            *[![:blank:],]*)
+            *[!$BLANK,]*)
                 parse_gateway
             ;;
             *)
@@ -1529,9 +1530,12 @@ select_web_tools ()
 
 echo_conf_vars ()
 {
+    echo "Function [${1:-}]"
     echo " =========== Config
                INTERFACE [$INTERFACE]
+       DEFAULT_INTERFACE [$DEFAULT_INTERFACE]
                   METRIC [$METRIC]
+          DEFAULT_METRIC [$DEFAULT_METRIC]
                 GATEWAYS [$GATEWAYS]
           CHECK_INTERVAL [$CHECK_INTERVAL]
                PING_HOST [$PING_HOST]
@@ -1542,6 +1546,14 @@ echo_conf_vars ()
        VIRTUAL_IPADDRESS [$VIRTUAL_IPADDRESS]
             VIRTUAL_PORT [$VIRTUAL_PORT]
  =========== VARS
+                NET_TOOL [$NET_TOOL]
+          HAS_IPV4_STACK [$HAS_IPV4_STACK]
+          HAS_IPV6_STACK [$HAS_IPV6_STACK]
+                   SLEEP [$SLEEP]
+                 TIMEOUT [$TIMEOUT]
+            PROC_NET_TCP [$PROC_NET_TCP]
+                LOCAL_IP [$LOCAL_IP]
+
         SPEEDTEST_SCHEME [$SPEEDTEST_SCHEME]
           SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
           SPEEDTEST_IPV4 [$SPEEDTEST_IPV4]
@@ -1558,14 +1570,6 @@ echo_conf_vars ()
                    PING6 [$PING6]
 
 VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
-
-                NET_TOOL [$NET_TOOL]
-          HAS_IPV4_STACK [$HAS_IPV4_STACK]
-          HAS_IPV6_STACK [$HAS_IPV6_STACK]
-                   SLEEP [$SLEEP]
-                 TIMEOUT [$TIMEOUT]
-            PROC_NET_TCP [$PROC_NET_TCP]
-                LOCAL_IP [$LOCAL_IP]
  =========== IP
            GATEWAYS_IPV4 [$GATEWAYS_IPV4]
            GATEWAYS_IPV6 [$GATEWAYS_IPV6]
@@ -2465,9 +2469,15 @@ main ()
     setup_core_env
     say "loading configuration..."
     include_config && set_variables
-    resolve_dependencies &&
-    verify_network_state || die
-    echo_conf_vars
+    echo_conf_vars set_variables
+    resolve_dependencies || {
+        echo_conf_vars resolve_dependencies
+        die
+    }
+    verify_network_state || {
+        echo_conf_vars verify_network_state
+        die
+    }
     exit
     check_permissions
     is_equal $EXIT_CODE 0 || die
