@@ -1161,39 +1161,44 @@ resolve_dependencies ()
             TIMEOUT="timeout"
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    PING4=""
-    PING6=""
+    PING_NEEDED="no"
     is_empty "${PING_HOST:-}" &&
     is_equal "$SPEEDTEST" "yes" &&
     is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
-
-        type ping >/dev/null 2>&1 && {
-
-            if is_equal "$HAS_IPV4_STACK" yes
-            then
-                ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
-                    PING4="ping -4" ||
-                    PING4="ping"
-            fi
-
-            if is_equal "$HAS_IPV6_STACK" yes
-            then
-                if ping -6 -c 1 -w 1 ::1
-                then
-                    PING6="ping -6"
-                elif type ping6 && ping6 -c 1 -w 1 ::1
-                then
-                    PING6="ping6"
-                else
-                    PING6=""
-                fi >/dev/null 2>&1
-            fi
-
-        } || say 127 "error: environment: gateway check impossible: 'ping' not found"
-
+        PING_NEEDED="yes"
+        type ping >/dev/null 2>&1 &&
+            say 127 "error: environment: gateway check impossible: 'ping' not found"
     }
 
     is_equal $EXIT_CODE 0
+}
+
+resolve_ping ()
+{
+    PING4=""
+    PING6=""
+
+    if is_equal "$HAS_IPV4_STACK" yes
+    then
+        ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
+            PING4="ping -4" ||
+            PING4="ping"
+    fi
+
+    if is_equal "$HAS_IPV6_STACK" yes
+    then
+        if ping -6 -c 1 -w 1 ::1
+        then
+            PING6="ping -6"
+        elif type ping6 && ping6 -c 1 -w 1 ::1
+        then
+            PING6="ping6"
+        else
+            PING6=""
+        fi >/dev/null 2>&1
+    fi
+
+    is_not_empty "${PING4:-${PING6:-}}"
 }
 
 optimize_gateways ()
@@ -1354,6 +1359,7 @@ verify_network_state ()
     HAS_IPV4_STACK="no"
     HAS_IPV6_STACK="no"
     LOCAL_IP="$(show_addresses)"
+
     for IP in ${LOCAL_IP:-}
     do
         case "$IP" in
@@ -1367,27 +1373,12 @@ verify_network_state ()
         is_equal "$HAS_IPV4_STACK" "no" ||
         is_equal "$HAS_IPV6_STACK" "no" || break
     done
-    is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" || {
-        say 1 "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
-        return 1
-    }
+    is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" ||
+        say "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
 
-    is_empty "${GATEWAYS_IPV4:-}" || {
-        GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
-        for GATEWAY in $GATEWAYS_IPV4
-        do
-            verify_gateway_remote ||
-                say "error: variable 'GATEWAYS': IPv4 $ERROR"
-        done
-    }
-
-    is_empty "${GATEWAYS_IPV6:-}" || {
-        GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
-        for GATEWAY in $GATEWAYS_IPV6
-        do
-            verify_gateway_remote ||
-                say "error: variable 'GATEWAYS': IPv6 $ERROR"
-        done
+    is_equal "$PING_NEEDED" "no" || resolve_ping || {
+        say "error: environment: 'ping' is unusable: network stack support check failed"
+        return $EXIT_CODE
     }
 
     is_empty "${PING_HOST:-}" || {
@@ -1397,7 +1388,6 @@ verify_network_state ()
                 PING_IPV6="${IPV6:-}"
             }
         } || say "error: variable 'PING_HOST': $ERROR"
-
     }
 
     is_equal "$SPEEDTEST" "no" || {
@@ -1410,19 +1400,41 @@ verify_network_state ()
     }
 
     is_empty "${GATEWAYS_IPV4:-}" || {
-        is_equal "$HAS_IPV4_STACK" "yes" ||
-            say 1 "error: environment: "
-        is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
-            say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
-        is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
-            say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
+        GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
+        for GATEWAY in $GATEWAYS_IPV4
+        do
+            verify_gateway_remote ||
+                say "error: variable 'GATEWAYS': IPv4 $ERROR"
+        done
+
+        if is_equal "$HAS_IPV4_STACK" "yes"
+        then
+            is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
+                say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
+            is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+                say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
+        else
+            say "error: environment: IPv4 gateways are defined, but IPv4 stack is unavailable"
+        fi
     }
 
     is_empty "${GATEWAYS_IPV6:-}" || {
-        is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
-            say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
-        is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
-            say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
+        GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
+        for GATEWAY in $GATEWAYS_IPV6
+        do
+            verify_gateway_remote ||
+                say "error: variable 'GATEWAYS': IPv6 $ERROR"
+        done
+
+        if is_equal "$HAS_IPV6_STACK" "yes"
+        then
+            is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
+                say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
+            is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+                say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
+        else
+            say "error: environment: IPv6 gateways are defined, but IPv6 stack is unavailable"
+        fi
     }
 
     is_equal "$ROLE" "single" ||
@@ -1435,7 +1447,7 @@ verify_network_state ()
             ERROR="IPv6 stack or ::1 not found"
             is_equal "$HAS_IPV6_STACK" "yes"
         ;;
-    esac || say 1 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
+    esac || say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
     LOCAL_IP=""
     is_equal $EXIT_CODE 0
