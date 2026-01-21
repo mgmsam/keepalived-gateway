@@ -823,6 +823,19 @@ set_variables ()
         ;;
     esac
 
+    case "${ROLE:=single}" in
+        cluster | master | master-advisor | single)
+        ;;
+        slave)
+            PING_HOST=""
+            SPEEDTEST="no"
+        ;;
+        *)
+            ROLE="single"
+            say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
+        ;;
+    esac
+
     case "${SPEEDTEST_SCOPE:-}" in
         "")
         ;;
@@ -847,15 +860,6 @@ set_variables ()
             SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
         } || say 2 "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
-
-    case "${ROLE:=single}" in
-        cluster | master | master-advisor | single | slave)
-        ;;
-        *)
-            ROLE="single"
-            say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
-        ;;
-    esac
 
     is_empty "${VIRTUAL_IPADDRESS:-}" && {
         is_equal "$ROLE" "single" ||
@@ -1399,7 +1403,10 @@ verify_network_state ()
         } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
 
-    is_empty "${GATEWAYS_IPV4:-}" || {
+    is_empty "${GATEWAYS_IPV4:-}" && {
+        PING_IPV4=""
+        SPEEDTEST_IPV4=""
+    } || {
         GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
         for GATEWAY in $GATEWAYS_IPV4
         do
@@ -1418,7 +1425,10 @@ verify_network_state ()
         fi
     }
 
-    is_empty "${GATEWAYS_IPV6:-}" || {
+    is_empty "${GATEWAYS_IPV6:-}" && {
+        PING_IPV6=""
+        SPEEDTEST_IPV6=""
+    } || {
         GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
         for GATEWAY in $GATEWAYS_IPV6
         do
