@@ -1460,14 +1460,8 @@ verify_network_state ()
     is_equal $EXIT_CODE 0
 }
 
-is_sync_enabled ()
+resolve_server ()
 {
-    case "$ROLE" in
-        single | slave)
-            return 0
-        ;;
-    esac
-
     RETURN=0
     ERROR="sync server determination impossible"
 
@@ -1481,11 +1475,8 @@ is_sync_enabled ()
         say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
     }
 
-    return $RETURN
-}
+    is_equal "$RETURN" 0 || return 0
 
-resolve_sync_server ()
-{
     check_daemon ()
     {
         $@ >&2 &
@@ -1644,25 +1635,24 @@ resolve_client ()
     done
 }
 
-select_web_tools ()
+resolve_transfer_tools ()
 {
-    if is_sync_enabled
-    then
-        resolve_sync_server
-        echo_conf_vars resolve_sync_server
-    fi
-
-    if is_equal "$SPEEDTEST" "yes" ||
-        case "$ROLE" in
-            cluster | slave)
-            ;;
-            *)
-                false
-            ;;
-        esac
-    then
-        resolve_client
-    fi
+    case "$ROLE" in
+        cluster)
+            resolve_server
+            resolve_client
+        ;;
+        master | master-advisor)
+            resolve_server
+            is_equal "$DO_SPEEDTEST" "no" || resolve_client
+        ;;
+        single)
+            is_equal "$DO_SPEEDTEST" "no" || resolve_client
+        ;;
+        slave)
+            resolve_client
+        ;;
+    esac
 }
 
 echo_conf_vars ()
@@ -2622,7 +2612,8 @@ main ()
         echo_conf_vars verify_network_state
         die
     }
-    select_web_tools
+    resolve_transfer_tools
+    echo_conf_vars resolve_transfer_tools
     exit
     check_permissions
     is_equal $EXIT_CODE 0 || die
