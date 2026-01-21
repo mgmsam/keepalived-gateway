@@ -1415,9 +1415,9 @@ verify_network_state ()
 
             if is_equal "$HAS_IPV4_STACK" "yes"
             then
-                is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
+                is_equal "$DO_PING" "no" || is_not_empty "${PING_IPV4:-}" ||
                     say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
-                is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+                is_equal "$DO_SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
                     say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
             else
                 say "error: environment: IPv4 gateways are defined, but IPv4 stack is unavailable"
@@ -1434,9 +1434,9 @@ verify_network_state ()
 
             if is_equal "$HAS_IPV6_STACK" "yes"
             then
-                is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
+                is_equal "$DO_PING" "no" || is_not_empty "${PING_IPV6:-}" ||
                     say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
-                is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+                is_equal "$DO_SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
                     say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
             else
                 say "error: environment: IPv6 gateways are defined, but IPv6 stack is unavailable"
