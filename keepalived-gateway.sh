@@ -1161,32 +1161,12 @@ resolve_dependencies ()
             TIMEOUT="timeout"
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    HAS_IPV4_STACK="no"
-    HAS_IPV6_STACK="no"
-    is_empty "${NET_TOOL:-}" || {
-        for LOCAL_IP in $(show_addresses)
-        do
-            case "$LOCAL_IP" in
-                127.0.0.1)
-                    HAS_IPV4_STACK="yes"
-                ;;
-                ::1)
-                    HAS_IPV6_STACK="yes"
-                ;;
-            esac
-            is_equal "$HAS_IPV4_STACK" "no" ||
-            is_equal "$HAS_IPV6_STACK" "no" || break
-        done
-    }
-
-    PING_NEEDED="no"
-    is_empty "${PING_HOST:-}" && is_equal "$SPEEDTEST" "yes" &&
-        is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" ||
-            PING_NEEDED="yes"
-
     PING4=""
     PING6=""
-    is_equal "$PING_NEEDED" "no" || {
+    is_empty "${PING_HOST:-}" &&
+    is_equal "$SPEEDTEST" "yes" &&
+    is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
+
         type ping >/dev/null 2>&1 && {
 
             if is_equal "$HAS_IPV4_STACK" yes
@@ -1210,6 +1190,7 @@ resolve_dependencies ()
             fi
 
         } || say 127 "error: environment: gateway check impossible: 'ping' not found"
+
     }
 
     is_equal $EXIT_CODE 0
@@ -1370,7 +1351,26 @@ is_port_free ()
 
 verify_network_state ()
 {
+    HAS_IPV4_STACK="no"
+    HAS_IPV6_STACK="no"
     LOCAL_IP="$(show_addresses)"
+    for IP in ${LOCAL_IP:-}
+    do
+        case "$IP" in
+            127.0.0.1)
+                HAS_IPV4_STACK="yes"
+            ;;
+            ::1)
+                HAS_IPV6_STACK="yes"
+            ;;
+        esac
+        is_equal "$HAS_IPV4_STACK" "no" ||
+        is_equal "$HAS_IPV6_STACK" "no" || break
+    done
+    is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" || {
+        say 1 "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
+        return 1
+    }
 
     is_empty "${GATEWAYS_IPV4:-}" || {
         GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
@@ -1391,18 +1391,51 @@ verify_network_state ()
     }
 
     is_empty "${PING_HOST:-}" || {
-        is_empty "${PING_FQDN:-}" || resolve_fqdn "$PING_FQDN" && {
-            PING_IPV4="${IPV4:-}"
-            PING_IPV6="${IPV6:-}"
+        is_empty "${PING_FQDN:-}" || {
+            resolve_fqdn "$PING_FQDN" && {
+                PING_IPV4="${IPV4:-}"
+                PING_IPV6="${IPV6:-}"
+            }
         } || say "error: variable 'PING_HOST': $ERROR"
+
     }
 
     is_equal "$SPEEDTEST" "no" || {
-        is_empty "${SPEEDTEST_FQDN:-}" || resolve_fqdn "$SPEEDTEST_FQDN" && {
-            SPEEDTEST_IPV4="${IPV4:-}"
-            SPEEDTEST_IPV6="${IPV6:-}"
+        is_empty "${SPEEDTEST_FQDN:-}" || {
+            resolve_fqdn "$SPEEDTEST_FQDN" && {
+                SPEEDTEST_IPV4="${IPV4:-}"
+                SPEEDTEST_IPV6="${IPV6:-}"
+            }
         } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
+
+    is_empty "${GATEWAYS_IPV4:-}" || {
+        is_equal "$HAS_IPV4_STACK" "yes" ||
+            say 1 "error: environment: "
+        is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
+            say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
+        is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+            say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
+    }
+
+    is_empty "${GATEWAYS_IPV6:-}" || {
+        is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
+            say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
+        is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+            say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
+    }
+
+    is_equal "$ROLE" "single" ||
+    case "${VIRTUAL_IPADDRESS_FAMILY:-}" in
+        inet)
+            ERROR="IPv4 stack or 127.0.0.1 not found"
+            is_equal "$HAS_IPV4_STACK" "yes"
+        ;;
+        inet6)
+            ERROR="IPv6 stack or ::1 not found"
+            is_equal "$HAS_IPV6_STACK" "yes"
+        ;;
+    esac || say 1 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
     LOCAL_IP=""
     is_equal $EXIT_CODE 0
@@ -1423,25 +1456,6 @@ is_sync_enabled ()
         RETURN=1
         say 127 "error: environment: $ERROR: 'sleep' not found"
     }
-
-    if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
-    then
-        is_equal "$HAS_IPV4_STACK" "yes" && {
-            LOCAL_IP="127.0.0.1"
-            BIND_IP="$LOCAL_IP"
-        } || {
-            RETURN=1
-            say 1 "error: environment: $ERROR: IPv4 stack or 127.0.0.1 not found"
-        }
-    else
-        is_equal "$HAS_IPV6_STACK" "yes" && {
-            LOCAL_IP="::1"
-            BIND_IP="[$LOCAL_IP]"
-        } || {
-            RETURN=1
-            say 1 "error: environment: $ERROR: IPv6 stack or ::1 not found"
-        }
-    fi
 
     is_port_free "$VIRTUAL_PORT" || {
         RETURN=1
@@ -1493,6 +1507,17 @@ resolve_sync_server ()
         return 1
     }
 
+    case "${VIRTUAL_IPADDRESS_FAMILY:-}" in
+        inet)
+            LOCAL_IP="127.0.0.1"
+            BIND_IP="$LOCAL_IP"
+        ;;
+        inet6)
+            LOCAL_IP="127.0.0.1"
+            BIND_IP="$LOCAL_IP"
+        ;;
+    esac
+
     GATEWAYS_SERVER_DISPATCHER=""
     MISSING_DEPS=""
     SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
@@ -1532,6 +1557,74 @@ resolve_sync_server ()
         say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
 }
 
+detect_client_curl ()
+{
+    :
+}
+
+detect_client_wget ()
+{
+    SCHEME="${SPEEDTEST_SCHEME:-http}"
+
+    "${GATEWAYS_IPV4:-}"
+    "${GATEWAYS_IPV6:-}"
+
+    "${SPEEDTEST_IPV4:-}"
+    "${SPEEDTEST_IPV6:-}"
+
+    wget $SCHEME://$IP:0
+
+    case "$SCHEME" in
+        http | https)
+        ;;
+        *)
+            case "$ROLE" in
+                cluster | slave)
+                    is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet" &&
+                        LOCAL_IP="127.0.0.1" ||
+                        LOCAL_IP="[::1]"
+                    wget http://$LOCAL_IP:0
+                ;;
+            esac
+        ;;
+    esac
+}
+
+detect_client_netcat ()
+{
+    :
+}
+
+resolve_client ()
+{
+    CLIENT=""
+    MISSING_DEPS=""
+    CLIENT_LIST="curl wget nc"
+    for COMMAND in $CLIENT_LIST
+    do
+        if type "$COMMAND" >/dev/null 2>&1
+        then
+            say -n "environment: role '$ROLE': found '$COMMAND': probing client capability..."
+            case "$COMMAND" in
+                curl)
+                    detect_client_curl && CLIENT="client_curl"
+                ;;
+                wget)
+                    detect_client_wget && CLIENT="client_wget"
+                ;;
+                nc)
+                    detect_client_netcat && CLIENT="client_netcat"
+                ;;
+            esac >/dev/null 2>&1 && {
+                say -p " [ OK ]"
+                break
+            }
+        else
+            MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
+        fi || say 0 -p " [ FAILED ]"
+    done
+}
+
 select_web_tools ()
 {
     if is_sync_enabled
@@ -1540,16 +1633,17 @@ select_web_tools ()
         echo_conf_vars resolve_sync_server
     fi
 
-    is_equal "$SPEEDTEST" "no" && is_equal "$ROLE" "single" || {
-        # web-client
-        for COMMAND in wget curl nc
-        do
-            if type "$COMMAND" >/dev/null 2>&1
-            then
-                echo "client: $COMMAND"
-            fi
-        done
-    }
+    if is_equal "$SPEEDTEST" "yes" ||
+        case "$ROLE" in
+            cluster | slave)
+            ;;
+            *)
+                false
+            ;;
+        esac
+    then
+        resolve_client
+    fi
 }
 
 echo_conf_vars ()
@@ -1604,6 +1698,9 @@ VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
  =========== Web Server
 GATEWAYS_SERVER_DISPATCHER [$GATEWAYS_SERVER_DISPATCHER]
                     SERVER [$SERVER]
+ =========== Web Client
+GATEWAYS_CLIENT_DISPATCHER [$GATEWAYS_CLIENT_DISPATCHER]
+                    CLIENT [$CLIENT]
  ---------------------------------------------------"
 }
 
