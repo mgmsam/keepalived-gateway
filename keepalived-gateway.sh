@@ -487,6 +487,44 @@ parse_gateway ()
     TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
 }
 
+parse_interval ()
+{
+    case "${2%[smhdwMy]}" in
+        "" | *[!0123456789]*)
+            return 1
+        ;;
+    esac
+    case "$2" in
+        *m) INTERVAL=$((${2%m} * 60)) ;;
+        *h) INTERVAL=$((${2%h} * 3600)) ;;
+        *d) INTERVAL=$((${2%d} * 86400)) ;;
+        *w) INTERVAL=$((${2%w} * 604800)) ;;
+        *M) INTERVAL=$((${2%M} * 2678400)) ;;
+        *y) INTERVAL=$((${2%y} * 32140800)) ;;
+         *) INTERVAL="${2%s}" ;;
+    esac
+}
+
+format_duration ()
+{
+    S=${1:-0}
+
+    D=$((S / 86400))
+    S=$((S % 86400))
+    H=$((S / 3600))
+    S=$((S % 3600))
+    M=$((S / 60))
+    S=$((S % 60))
+
+    RESULT=""
+    test "$D" -gt 0 && RESULT="${D}d" || :
+    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
+    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
+    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
+
+    puts "$RESULT"
+}
+
 deprecated_parse_gateway ()
 {
     case "$FAMILY" in
@@ -734,46 +772,23 @@ parse_resource ()
     esac
 }
 
-parse_interval ()
-{
-    case "${2%[smhdwMy]}" in
-        "" | *[!0123456789]*)
-            return 1
-        ;;
-    esac
-    case "$2" in
-        *m) INTERVAL=$((${2%m} * 60)) ;;
-        *h) INTERVAL=$((${2%h} * 3600)) ;;
-        *d) INTERVAL=$((${2%d} * 86400)) ;;
-        *w) INTERVAL=$((${2%w} * 604800)) ;;
-        *M) INTERVAL=$((${2%M} * 2678400)) ;;
-        *y) INTERVAL=$((${2%y} * 32140800)) ;;
-         *) INTERVAL="${2%s}" ;;
-    esac
-}
-
-format_duration ()
-{
-    S=${1:-0}
-
-    D=$((S / 86400))
-    S=$((S % 86400))
-    H=$((S / 3600))
-    S=$((S % 3600))
-    M=$((S / 60))
-    S=$((S % 60))
-
-    RESULT=""
-    test "$D" -gt 0 && RESULT="${D}d" || :
-    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
-    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
-    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
-
-    puts "$RESULT"
-}
-
 set_variables ()
 {
+    case "${ROLE:=single}" in
+        cluster | master | master-advisor | single)
+            DO_PING="yes"
+            DO_SPEEDTEST="yes"
+        ;;
+        slave)
+            DO_PING="no"
+            DO_SPEEDTEST="no"
+        ;;
+        *)
+            ROLE="unknown"
+            say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
+        ;;
+    esac
+
     is_empty "${INTERFACE:-}" || {
         DEFAULT_INTERFACE="$INTERFACE"
         is_interface "$INTERFACE" ||
@@ -783,26 +798,28 @@ set_variables ()
     is_metric "${METRIC:-0}" && DEFAULT_METRIC="${METRIC:-}" ||
         say 2 "error: variable 'METRIC': route metric $ERROR"
 
-    is_not_empty "${GATEWAYS:-}" && {
-        case "${GATEWAYS:-}" in
-            *[!][a-zA-Z0-9$BLANK.:_=,-]*)
-                say 2 "error: variable 'GATEWAYS': contains forbidden characters"
-            ;;
-            *[!$BLANK,]*)
-                parse_gateway
-            ;;
-            *)
-                say 2 "error: variable 'GATEWAYS': no valid gateways found"
-            ;;
-        esac
-    } || say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+    is_empty "${GATEWAYS:-}" && {
+        is_equal "$ROLE" "slave" || is_equal "$ROLE" "unknown" ||
+            say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+    } ||
+    case "${GATEWAYS:-}" in
+        *[!][a-zA-Z0-9$BLANK.:_=,-]*)
+            say 2 "error: variable 'GATEWAYS': contains forbidden characters"
+        ;;
+        *[!$BLANK,]*)
+            parse_gateway
+        ;;
+        *)
+            say 2 "error: variable 'GATEWAYS': no valid gateways found"
+        ;;
+    esac
 
     parse_interval CHECK_INTERVAL "${CHECK_INTERVAL:=30}" && {
         CHECK_INTERVAL="$INTERVAL"
         HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
     } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y]"
 
-    is_empty "${PING_HOST:-}" || {
+    is_empty "${PING_HOST:-}" && DO_PING="no" || {
         parse_resource "$PING_HOST" && {
             PING_FQDN="${FQDN:-}"
             PING_IPV4="${IPV4:-}"
@@ -812,27 +829,14 @@ set_variables ()
 
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
-            SPEEDTEST=no
+            DO_SPEEDTEST="no"
         ;;
         1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
-            SPEEDTEST=yes
+            DO_SPEEDTEST="yes"
         ;;
         *)
-            SPEEDTEST=no
+            DO_SPEEDTEST="no"
             say 2 "error: variable 'SPEEDTEST': must be 'yes' or 'no'"
-        ;;
-    esac
-
-    case "${ROLE:=single}" in
-        cluster | master | master-advisor | single)
-        ;;
-        slave)
-            PING_HOST=""
-            SPEEDTEST="no"
-        ;;
-        *)
-            ROLE="single"
-            say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
         ;;
     esac
 
@@ -848,7 +852,7 @@ set_variables ()
     esac
 
     is_empty "${SPEEDTEST_HOST:-}" && {
-        is_equal "$SPEEDTEST" "no" ||
+        is_equal "$DO_SPEEDTEST" "no" ||
             say 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
     } || {
         parse_resource "$SPEEDTEST_HOST" && {
@@ -862,7 +866,7 @@ set_variables ()
     }
 
     is_empty "${VIRTUAL_IPADDRESS:-}" && {
-        is_equal "$ROLE" "single" ||
+        is_equal "$ROLE" "single" || is_equal "$ROLE" "unknown" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS' is empty: required for roles 'cluster, master, master-advisor, slave'"
     } || {
         parse_resource "$VIRTUAL_IPADDRESS" ||
@@ -879,7 +883,7 @@ set_variables ()
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
-        is_equal "$ROLE" "single" ||
+        is_equal "$ROLE" "single" || is_equal "$ROLE" "unknown" ||
             say 2 "error: variable 'VIRTUAL_PORT': is empty: required for roles 'cluster, master, master-advisor, slave'"
     } || is_port "$VIRTUAL_PORT" || {
         VIRTUAL_PORT=""
@@ -1031,7 +1035,7 @@ resolve_dependencies ()
     if is_equal "${NET_TOOL:-}" "ip"
     then
         case "$ROLE" in
-            single | slave)
+            single | slave | unknown)
             ;;
             *)
                 false
@@ -1137,8 +1141,7 @@ resolve_dependencies ()
         fi
     fi
 
-    is_equal "$SPEEDTEST" "no" || {
-
+    is_equal "$DO_SPEEDTEST" "no" || {
         MISSING_DEPS=""
         for COMMAND in date wc
         do
@@ -1166,12 +1169,14 @@ resolve_dependencies ()
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
     PING_NEEDED="no"
-    is_empty "${PING_HOST:-}" &&
-    is_equal "$SPEEDTEST" "yes" &&
-    is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
-        PING_NEEDED="yes"
-        type ping >/dev/null 2>&1 &&
-            say 127 "error: environment: gateway check impossible: 'ping' not found"
+    is_equal "$ROUTE" "slave" || is_equal "$ROUTE" "unknown" || {
+        is_equal "$DO_PING" "no" &&
+        is_equal "$DO_SPEEDTEST" "yes" &&
+        is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
+            PING_NEEDED="yes"
+            type ping >/dev/null 2>&1 &&
+                say 127 "error: environment: gateway check impossible: 'ping' not found"
+        }
     }
 
     is_equal $EXIT_CODE 0
@@ -1203,6 +1208,68 @@ resolve_ping ()
     fi
 
     is_not_empty "${PING4:-${PING6:-}}"
+}
+
+resolve_fqdn ()
+{
+    is_empty "${PING4:-}" ||
+        IPV4="$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
+            /PING/ {
+                gsub(/[][)(:]/, " ", $0)
+                for (ip=1; ip<=NF; ip++) {
+                    if ($ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                        print $ip
+                        exit
+                    }
+                }
+            }
+        ')" || :
+
+    is_empty "${PING6:-}" ||
+        IPV6="$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
+            /PING/ {
+                gsub(/[][)(]/, " ")
+                for (ip=1; ip<=NF; ip++) {
+                    sub(/:$/, "", $ip)
+                    if ($ip ~ /^[0-9a-fA-F:]+$/ && $ip ~ /:/) {
+                        print $ip
+                        exit
+                    }
+                }
+            }
+        ')" || :
+
+    if is_empty "${IPV4:+${IPV6:-}}" && is_file "/etc/hosts"
+    then
+        is_not_empty "${IPV4:-}" ||
+            IPV4=$(awk '
+                /^[ \t]*[^#]/ {
+                    for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                        if ($1 ~ /\./) {
+                            print $1
+                            exit
+                        }
+                    }
+                }
+            ' /etc/hosts)
+
+        is_not_empty "${IPV6:-}" ||
+            IPV6=$(awk '
+                /^[ \t]*[^#]/ {
+                    for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
+                        if ($1 ~ /:/) {
+                            print $1
+                            exit
+                        }
+                    }
+                }
+            ' /etc/hosts)
+    fi
+
+    is_not_empty "${IPV4:-${IPV6:-}}" || {
+        ERROR="failed to resolve FQDN to IP address: $1"
+        return 1
+    }
 }
 
 optimize_gateways ()
@@ -1282,68 +1349,6 @@ verify_gateway_remote ()
     fi
 }
 
-resolve_fqdn ()
-{
-    is_empty "${PING4:-}" ||
-        IPV4="$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
-            /PING/ {
-                gsub(/[][)(:]/, " ", $0)
-                for (ip=1; ip<=NF; ip++) {
-                    if ($ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
-                        print $ip
-                        exit
-                    }
-                }
-            }
-        ')" || :
-
-    is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
-            /PING/ {
-                gsub(/[][)(]/, " ")
-                for (ip=1; ip<=NF; ip++) {
-                    sub(/:$/, "", $ip)
-                    if ($ip ~ /^[0-9a-fA-F:]+$/ && $ip ~ /:/) {
-                        print $ip
-                        exit
-                    }
-                }
-            }
-        ')" || :
-
-    if is_empty "${IPV4:+${IPV6:-}}" && is_file "/etc/hosts"
-    then
-        is_not_empty "${IPV4:-}" ||
-            IPV4=$(awk '
-                /^[ \t]*[^#]/ {
-                    for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                        if ($1 ~ /\./) {
-                            print $1
-                            exit
-                        }
-                    }
-                }
-            ' /etc/hosts)
-
-        is_not_empty "${IPV6:-}" ||
-            IPV6=$(awk '
-                /^[ \t]*[^#]/ {
-                    for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
-                        if ($1 ~ /:/) {
-                            print $1
-                            exit
-                        }
-                    }
-                }
-            ' /etc/hosts)
-    fi
-
-    is_not_empty "${IPV4:-${IPV6:-}}" || {
-        ERROR="failed to resolve FQDN to IP address: $1"
-        return 1
-    }
-}
-
 is_port_free ()
 {
     show_ports | awk '
@@ -1385,66 +1390,58 @@ verify_network_state ()
         return $EXIT_CODE
     }
 
-    is_empty "${PING_HOST:-}" || {
-        is_empty "${PING_FQDN:-}" || {
-            resolve_fqdn "$PING_FQDN" && {
-                PING_IPV4="${IPV4:-}"
-                PING_IPV6="${IPV6:-}"
-            }
-        } || say "error: variable 'PING_HOST': $ERROR"
-    }
+    is_equal "$DO_PING" "no" || is_empty "${PING_FQDN:-}" || {
+        resolve_fqdn "$PING_FQDN" && {
+            PING_IPV4="${IPV4:-}"
+            PING_IPV6="${IPV6:-}"
+        }
+    } || say "error: variable 'PING_HOST': $ERROR"
 
-    is_equal "$SPEEDTEST" "no" || {
-        is_empty "${SPEEDTEST_FQDN:-}" || {
-            resolve_fqdn "$SPEEDTEST_FQDN" && {
-                SPEEDTEST_IPV4="${IPV4:-}"
-                SPEEDTEST_IPV6="${IPV6:-}"
-            }
-        } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
-    }
+    is_equal "$DO_SPEEDTEST" "no" || is_empty "${SPEEDTEST_FQDN:-}" || {
+        resolve_fqdn "$SPEEDTEST_FQDN" && {
+            SPEEDTEST_IPV4="${IPV4:-}"
+            SPEEDTEST_IPV6="${IPV6:-}"
+        }
+    } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
 
-    is_empty "${GATEWAYS_IPV4:-}" && {
-        PING_IPV4=""
-        SPEEDTEST_IPV4=""
-    } || {
-        GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
-        for GATEWAY in $GATEWAYS_IPV4
-        do
-            verify_gateway_remote ||
-                say "error: variable 'GATEWAYS': IPv4 $ERROR"
-        done
+    is_equal "$ROLE" "slave" || {
+        is_empty "${GATEWAYS_IPV4:-}" || {
+            GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
+            for GATEWAY in $GATEWAYS_IPV4
+            do
+                verify_gateway_remote ||
+                    say "error: variable 'GATEWAYS': IPv4 $ERROR"
+            done
 
-        if is_equal "$HAS_IPV4_STACK" "yes"
-        then
-            is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
-                say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
-            is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
-                say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
-        else
-            say "error: environment: IPv4 gateways are defined, but IPv4 stack is unavailable"
-        fi
-    }
+            if is_equal "$HAS_IPV4_STACK" "yes"
+            then
+                is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV4:-}" ||
+                    say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
+                is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+                    say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
+            else
+                say "error: environment: IPv4 gateways are defined, but IPv4 stack is unavailable"
+            fi
+        }
 
-    is_empty "${GATEWAYS_IPV6:-}" && {
-        PING_IPV6=""
-        SPEEDTEST_IPV6=""
-    } || {
-        GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
-        for GATEWAY in $GATEWAYS_IPV6
-        do
-            verify_gateway_remote ||
-                say "error: variable 'GATEWAYS': IPv6 $ERROR"
-        done
+        is_empty "${GATEWAYS_IPV6:-}" || {
+            GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
+            for GATEWAY in $GATEWAYS_IPV6
+            do
+                verify_gateway_remote ||
+                    say "error: variable 'GATEWAYS': IPv6 $ERROR"
+            done
 
-        if is_equal "$HAS_IPV6_STACK" "yes"
-        then
-            is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
-                say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
-            is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
-                say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
-        else
-            say "error: environment: IPv6 gateways are defined, but IPv6 stack is unavailable"
-        fi
+            if is_equal "$HAS_IPV6_STACK" "yes"
+            then
+                is_empty "${PING_HOST:-}" || is_not_empty "${PING_IPV6:-}" ||
+                    say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
+                is_empty "${SPEEDTEST_HOST:-}" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+                    say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
+            else
+                say "error: environment: IPv6 gateways are defined, but IPv6 stack is unavailable"
+            fi
+        }
     }
 
     is_equal "$ROLE" "single" ||
