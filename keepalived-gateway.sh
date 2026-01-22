@@ -1569,7 +1569,64 @@ resolve_server ()
 
 detect_curl_client ()
 {
-    :
+    check_curl ()
+    {
+        say -n "$PREFIX: probing $3 $4 client capability..."
+        STATE="$(2>&1 curl $1://$2:0 || :)"
+        case "${STATE:-}" in
+            *connect*)
+                say -p " [ OK ]"
+                return 0
+            ;;
+            *Protocol*)
+                say -p " [unsupported scheme ‘$1’]"
+                return 1
+            ;;
+            *URL* | *resolve*)
+                say -p " [$3 unsupported]"
+                return 2
+            ;;
+            *)
+                say -p " [undefined error]"
+                return 3
+        esac
+    }
+
+    is_equal "$DO_SPEEDTEST" "no" ||
+    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
+    case "$SPEEDTEST_SCHEME" in
+        http | https | ftp | sftp | ftps | tftp | file | scp)
+            is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
+                is_empty "${SPEEDTEST_IPV4:-}" || {
+                    check_curl "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 speedtest &&
+                        FETCH_SPEEDTEST_IPV4="fetch_curl" || RETURN=1
+                }
+            }
+            is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
+                is_empty "${SPEEDTEST_IPV6:-}" || {
+                    check_curl "$SPEEDTEST_SCHEME" [::1] IPv6 speedtest &&
+                        FETCH_SPEEDTEST_IPV6="fetch_curl" || RETURN=1
+                }
+            }
+        ;;
+        *)
+            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
+        ;;
+    esac
+
+    case "$ROLE" in
+        cluster | slave)
+            is_not_empty "${FETCH_GATEWAYS:-}" || {
+                if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
+                then
+                    check_curl http 127.0.0.1 IPV4 gateway
+                else
+                    check_curl http [::1] IPV6 gateway
+                fi && FETCH_GATEWAYS="fetch_curl" || RETURN=1
+            }
+        ;;
+    esac
+    return $RETURN
 }
 
 detect_wget_client ()
@@ -1592,7 +1649,7 @@ detect_wget_client ()
                 return 2
             ;;
             *)
-                say -p " [undefined]"
+                say -p " [undefined error]"
                 return 3
         esac
     }
