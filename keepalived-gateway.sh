@@ -1528,7 +1528,7 @@ resolve_server ()
         ;;
     esac
 
-    GATEWAYS_SERVER_DISPATCHER=""
+    SERVE_GATEWAYS=""
     MISSING_DEPS=""
     SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
     for COMMAND in $SYNC_SERVER_LIST
@@ -1539,11 +1539,11 @@ resolve_server ()
             case "$COMMAND" in
                 nc)
                     detect_netcat_server &&
-                        GATEWAYS_SERVER_DISPATCHER="serve_gateways_netcat"
+                        SERVE_GATEWAYS="serve_gateways_netcat"
                 ;;
                 uhttpd | httpd)
                     check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
-                        GATEWAYS_SERVER_DISPATCHER="serve_gateways_httpd"
+                        SERVE_GATEWAYS="serve_gateways_httpd"
                         is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
                             SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
                             SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
@@ -1551,7 +1551,7 @@ resolve_server ()
                 ;;
                 telnetd)
                     check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
-                        GATEWAYS_SERVER_DISPATCHER="serve_gateways_telnetd"
+                        SERVE_GATEWAYS="serve_gateways_telnetd"
                         SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
                     }
                 ;;
@@ -1563,76 +1563,111 @@ resolve_server ()
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         fi || say 0 -p " [ FAILED ]"
     done
-    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+    is_not_empty "${SERVE_GATEWAYS:-}" ||
         say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
 }
 
-detect_client_curl ()
+detect_curl_client ()
 {
     :
 }
 
-detect_client_wget ()
+detect_wget_client ()
 {
-    SCHEME="${SPEEDTEST_SCHEME:-http}"
+    check_wget ()
+    {
+        say -n "$PREFIX: probing $3 $4 client capability..."
+        STATE="$(2>&1 wget $1://$2:0 || :)"
+        case "${STATE:-}" in
+            *Connection*)
+                say -p " [ OK ]"
+                return 0
+            ;;
+            *family* | *socket*)
+                say -p " [$3 unsupported]"
+                return 1
+            ;;
+            *support* | *http* | *ftp*)
+                say -p " [unsupported scheme ‘$1’]"
+                return 2
+            ;;
+            *)
+                say -p " [undefined]"
+                return 3
+        esac
+    }
 
-    "${GATEWAYS_IPV4:-}"
-    "${GATEWAYS_IPV6:-}"
-
-    "${SPEEDTEST_IPV4:-}"
-    "${SPEEDTEST_IPV6:-}"
-
-    wget $SCHEME://$IP:0
-
-    case "$SCHEME" in
-        http | https)
+    is_equal "$DO_SPEEDTEST" "no" ||
+    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
+    case "$SPEEDTEST_SCHEME" in
+        http | https | ftp | ftps)
+            is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
+                is_empty "${SPEEDTEST_IPV4:-}" || {
+                    check_wget "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 speedtest &&
+                        FETCH_SPEEDTEST_IPV4="fetch_wget" || RETURN=1
+                }
+            }
+            is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
+                is_empty "${SPEEDTEST_IPV6:-}" || {
+                    check_wget "$SPEEDTEST_SCHEME" [::1] IPv6 speedtest &&
+                        FETCH_SPEEDTEST_IPV6="fetch_wget" || RETURN=1
+                }
+            }
         ;;
         *)
-            case "$ROLE" in
-                cluster | slave)
-                    is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet" &&
-                        LOCAL_IP="127.0.0.1" ||
-                        LOCAL_IP="[::1]"
-                    wget http://$LOCAL_IP:0
-                ;;
-            esac
+            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
         ;;
     esac
+
+    case "$ROLE" in
+        cluster | slave)
+            is_not_empty "${FETCH_GATEWAYS:-}" || {
+                if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
+                then
+                    check_wget http 127.0.0.1 IPV4 gateway
+                else
+                    check_wget http [::1] IPV6 gateway
+                fi && FETCH_GATEWAYS="fetch_wget" || RETURN=1
+            }
+        ;;
+    esac
+    return $RETURN
 }
 
-detect_client_netcat ()
+detect_netcat_client ()
 {
     :
 }
 
 resolve_client ()
 {
-    CLIENT=""
     MISSING_DEPS=""
+    FETCH_GATEWAYS=""
+    FETCH_SPEEDTEST_IPV4=""
+    FETCH_SPEEDTEST_IPV6=""
     CLIENT_LIST="curl wget nc"
     for COMMAND in $CLIENT_LIST
     do
         if type "$COMMAND" >/dev/null 2>&1
         then
-            say -n "environment: role '$ROLE': found '$COMMAND': probing client capability..."
+            RETURN=0
+            PREFIX="environment: role '$ROLE': found '$COMMAND'"
             case "$COMMAND" in
                 curl)
-                    detect_client_curl && CLIENT="client_curl"
+                    detect_curl_client
                 ;;
                 wget)
-                    detect_client_wget && CLIENT="client_wget"
+                    detect_wget_client
                 ;;
                 nc)
-                    detect_client_netcat && CLIENT="client_netcat"
+                    detect_netcat_client
                 ;;
-            esac >/dev/null 2>&1 && {
-                say -p " [ OK ]"
-                break
-            }
+            esac && break || continue
         else
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
-        fi || say 0 -p " [ FAILED ]"
+        fi
     done
+    is_equal $RETURN 0
 }
 
 resolve_transfer_tools ()
@@ -1705,11 +1740,11 @@ VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
                   IFACES [$IFACES]
 
  =========== Web Server
-GATEWAYS_SERVER_DISPATCHER [$GATEWAYS_SERVER_DISPATCHER]
-                    SERVER [$SERVER]
+          SERVE_GATEWAYS [$SERVE_GATEWAYS]
+                  SERVER [$SERVER]
  =========== Web Client
-GATEWAYS_CLIENT_DISPATCHER [$GATEWAYS_CLIENT_DISPATCHER]
-                    CLIENT [$CLIENT]
+          FETCH_GATEWAYS [$FETCH_GATEWAYS]
+                  CLIENT [$CLIENT]
  ---------------------------------------------------"
 }
 
@@ -1910,32 +1945,32 @@ detect_sync_transport ()
 {
     RETURN=0
 
-    GATEWAYS_SERVER_DISPATCHER=""
-    GATEWAYS_CLIENT_DISPATCHER=""
+    SERVE_GATEWAYS=""
+    FETCH_GATEWAYS=""
 
     for COMMAND in uhttpd telnetd nc
     do
         if type "$COMMAND" >/dev/null 2>&1
         then
             is_diff "$COMMAND" "nc" || detect_netcat_server || break
-            GATEWAYS_SERVER_DISPATCHER="serve_gateways_$COMMAND"
+            SERVE_GATEWAYS="serve_gateways_$COMMAND"
             break
         fi
     done
 
-    is_not_empty "${GATEWAYS_SERVER_DISPATCHER:-}" ||
+    is_not_empty "${SERVE_GATEWAYS:-}" ||
         die "error: no supported sync server found (uhttpd/telnetd/nc required)"
 
     for COMMAND in wget curl nc
     do
         if type "$COMMAND" >/dev/null 2>&1
         then
-            GATEWAYS_CLIENT_DISPATCHER="fetch_gateways_$COMMAND"
+            FETCH_GATEWAYS="fetch_gateways_$COMMAND"
             break
         fi
     done
 
-    is_not_empty "${GATEWAYS_CLIENT_DISPATCHER:-}" ||
+    is_not_empty "${FETCH_GATEWAYS:-}" ||
         die "error: no supported sync client found (wget/curl/nc required)"
 }
 
@@ -2488,7 +2523,7 @@ serve_gateways_telnetd ()
     $SERVER -f "$GATEWAYS_STATE_FILE"
 }
 
-share_gateways ()
+serve_gateways ()
 {
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
         is_port_free "$VIRTUAL_PORT" || {
@@ -2496,7 +2531,7 @@ share_gateways ()
             return
         } >&2
 
-        $GATEWAYS_SERVER_DISPATCHER 2>&1 &
+        $SERVE_GATEWAYS 2>&1 &
         GATEWAY_SERVER_PID=$!
         sleep 1
 
@@ -2510,7 +2545,7 @@ share_gateways ()
     }
 }
 
-stop_share_gateways ()
+stop_serve_gateways ()
 {
     if is_process_alive "${GATEWAY_SERVER_PID:-}"
     then
@@ -2520,21 +2555,21 @@ stop_share_gateways ()
     fi
 }
 
-fetch_gateways_wget ()
+fetch_wget ()
 {
     FETCHED_GATEWAYS="$(
         2>&1 wget -O - "http://${VIRTUAL_IPADDRESS%/*}:$VIRTUAL_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
-fetch_gateways_curl ()
+fetch_curl ()
 {
     FETCHED_GATEWAYS="$(
         2>&1 curl -o - "http://${VIRTUAL_IPADDRESS%/*}:$VIRTUAL_PORT/${GATEWAYS_STATE_FILE##*/}"
     )"
 }
 
-fetch_gateways_nc ()
+fetch_nc ()
 {
     FETCHED_GATEWAYS="$(
         2>&1 $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$VIRTUAL_PORT" <<EOF
@@ -2563,7 +2598,7 @@ fetch_gateways ()
     say "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
     while is_diff $COUNT $RETRIES
     do
-        "$GATEWAYS_CLIENT_DISPATCHER" && {
+        "$FETCH_GATEWAYS" && {
             SUCCESS=0
             break
         } || COUNT=$((COUNT + 1))
@@ -2660,13 +2695,13 @@ main ()
                 check_gateways || {
                     reconcile_gateways
                     update_gateways_state
-                } && share_gateways || stop_share_gateways
+                } && serve_gateways || stop_serve_gateways
             else
                 case "$STATE" in
                     "slave" | "master" | "master-advisor" | "init")
                         case "$STATE" in
                             "master" | "master-advisor")
-                                stop_share_gateways
+                                stop_serve_gateways
                             ;;
                         esac
                         is_equal "$STATE" "slave" || {
