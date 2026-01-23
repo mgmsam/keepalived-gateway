@@ -1454,13 +1454,6 @@ resolve_server ()
     detect_netcat_server ()
     {
         # Debian
-        if check_daemon nc -l -p $VIRTUAL_PORT $LOCAL_IP
-        then
-            SERVER="nc -l -p $VIRTUAL_PORT $VIRTUAL_IPADDRESS"
-            return 0
-        fi
-
-        # Ubuntu
         if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
         then
             SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
