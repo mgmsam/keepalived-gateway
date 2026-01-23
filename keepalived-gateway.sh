@@ -1090,9 +1090,44 @@ resolve_dependencies ()
     then
         if type netstat >/dev/null 2>&1
         then
+            NETSTAT_IPV4=""
+            NETSTAT_IPV6=""
+            for i in -4 --inet "-f inet"
+            do
+                if netstat $i -rn
+                then
+                    NETSTAT_IPV4="$i"
+                    break
+                fi
+            done >/dev/null 2>&1
+
+            for i in -6 --inet6 "-f inet6"
+            do
+                if netstat $i -rn
+                then
+                    NETSTAT_IPV6="$i"
+                    break
+                fi
+            done >/dev/null 2>&1
+
             show_routes ()
             {
-                netstat -rn
+                case "${1:-}" in
+                    -4)
+                        netstat ${NETSTAT_IPV4:-} -rn
+                    ;;
+                    -6)
+                        netstat ${NETSTAT_IPV6:-} -rn
+                    ;;
+                    -64)
+                        netstat ${NETSTAT_IPV6:-} -rn
+                        netstat ${NETSTAT_IPV4:-} -rn
+                    ;;
+                    "" | -46)
+                        netstat ${NETSTAT_IPV4:-} -rn
+                        netstat ${NETSTAT_IPV6:-} -rn
+                    ;;
+                esac
             }
         else
             say 127 "error: environment: routing table check impossible: 'netstat' not found"
@@ -1788,6 +1823,9 @@ echo_conf_vars ()
              PING_NEEDED [$PING_NEEDED]
                    PING4 [$PING4]
                    PING6 [$PING6]
+ =========== NET TOOL
+            NETSTAT_IPV4 [$NETSTAT_IPV4]
+            NETSTAT_IPV6 [$NETSTAT_IPV6]
  =========== IP
            GATEWAYS_IPV4 [$GATEWAYS_IPV4]
            GATEWAYS_IPV6 [$GATEWAYS_IPV6]
@@ -1805,6 +1843,8 @@ echo_conf_vars ()
     FETCH_SPEEDTEST_IPV4 [$FETCH_SPEEDTEST_IPV4]
     FETCH_SPEEDTEST_IPV6 [$FETCH_SPEEDTEST_IPV6]
         SPEEDTEST_TARGET [$SPEEDTEST_TARGET]
+ ---------------------------------------------------
+               EXIT_CODE [$EXIT_CODE]
  ---------------------------------------------------"
 }
 
@@ -2449,10 +2489,10 @@ main ()
     resolve_transfer_tools
     echo_conf_vars resolve_transfer_tools
     is_equal $EXIT_CODE 0 || die
+    show_routes
     exit
     remove_test_route || die
     say "initialization complete, system ready"
-
     trap 'clean_and_exit' 0      # EXIT (0) : Naturally occurring script termination.
     trap 'clean_and_exit 129' 1  # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
     trap 'clean_and_exit 130' 2  # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
