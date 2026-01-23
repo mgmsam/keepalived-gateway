@@ -816,12 +816,16 @@ set_variables ()
             say 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
     } || {
         parse_resource "$SPEEDTEST_HOST" && {
+            SPEEDTEST_SCHEME="${SCHEME:=http}"
+            SPEEDTEST_HOSTNAME="${FQDN:-${IPV4:-${IPV6:-}}}"
             SPEEDTEST_FQDN="${FQDN:-}"
             SPEEDTEST_IPV4="${IPV4:-}"
             SPEEDTEST_IPV6="${IPV6:-}"
-            RESOURCE="${RESOURCE:+"/$RESOURCE"}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-            SPEEDTEST_SCHEME="${SCHEME:-http}"
-            SPEEDTEST_URL_PREFIX="$SPEEDTEST_SCHEME://${USER_INFO:+$USER_INFO@}"
+            SPEEDTEST_PORT="${PORT:-}"
+            SPEEDTEST_RESOURCE="${RESOURCE:-}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
+            SPEEDTEST_RESOURCE="/${SPEEDTEST_RESOURCE#${SPEEDTEST_RESOURCE%%[!/]*}}"
+            SPEEDTEST_URL="$SCHEME://$SPEEDTEST_HOSTNAME${PORT:+:$PORT}${SPEEDTEST_RESOURCE:-}"
+            SPEEDTEST_NETCAT_ARGS="$SPEEDTEST_HOSTNAME ${SPEEDTEST_PORT:-80} ${SPEEDTEST_RESOURCE:-}"
         } || say 2 "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
 
@@ -1595,7 +1599,7 @@ probe_speedtest_fetcher ()
         is_empty "${SPEEDTEST_IPV4:-}" || {
             say -n "$PREFIX: probing IPv4 speedtest client capability..."
             $1 "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 && {
-                FETCH_SPEEDTEST_IPV4="$2"
+                FETCH_SPEEDTEST_IPV4="$2 ${SPEEDTEST_TARGET:-}"
                 say -p " [ OK ]"
             } || RETURN=1
         }
@@ -1604,7 +1608,7 @@ probe_speedtest_fetcher ()
         is_empty "${SPEEDTEST_IPV6:-}" || {
             say -n "$PREFIX: probing IPv6 speedtest client capability..."
             $1 "$SPEEDTEST_SCHEME" [::1] IPv6 && {
-                FETCH_SPEEDTEST_IPV6="$2"
+                FETCH_SPEEDTEST_IPV6="$2 ${SPEEDTEST_TARGET:-}"
                 say -p " [ OK ]"
             } || RETURN=1
         }
@@ -1666,12 +1670,15 @@ resolve_client ()
         then
             case "$COMMAND" in
                 curl)
+                    SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
                     probe_client_capabilities detect_curl_client fetch_curl "http https ftp sftp ftps tftp file scp"
                 ;;
                 wget)
+                    SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
                     probe_client_capabilities detect_wget_client fetch_wget "http https ftp ftps"
                 ;;
                 nc)
+                    SPEEDTEST_TARGET="${SPEEDTEST_NETCAT_ARGS:-}"
                     probe_client_capabilities detect_netcat_client fetch_netcat http
                 ;;
             esac && break || continue
@@ -1719,6 +1726,7 @@ echo_conf_vars ()
                     ROLE [$ROLE]
        VIRTUAL_IPADDRESS [$VIRTUAL_IPADDRESS]
             VIRTUAL_PORT [$VIRTUAL_PORT]
+VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
  =========== VARS
                 NET_TOOL [$NET_TOOL]
           HAS_IPV4_STACK [$HAS_IPV4_STACK]
@@ -1730,12 +1738,14 @@ echo_conf_vars ()
 
             DO_SPEEDTEST [$DO_SPEEDTEST]
         SPEEDTEST_SCHEME [$SPEEDTEST_SCHEME]
+      SPEEDTEST_HOSTNAME [$SPEEDTEST_HOSTNAME]
           SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
           SPEEDTEST_IPV4 [$SPEEDTEST_IPV4]
           SPEEDTEST_IPV6 [$SPEEDTEST_IPV6]
-                RESOURCE [$RESOURCE]
-    SPEEDTEST_URL_PREFIX [$SPEEDTEST_URL_PREFIX]
-          SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
+          SPEEDTEST_PORT [$SPEEDTEST_PORT]
+      SPEEDTEST_RESOURCE [$SPEEDTEST_RESOURCE]
+           SPEEDTEST_URL [$SPEEDTEST_URL]
+   SPEEDTEST_NETCAT_ARGS [$SPEEDTEST_NETCAT_ARGS]
 
                  DO_PING [$DO_PING]
                PING_FQDN [$PING_FQDN]
@@ -1744,8 +1754,6 @@ echo_conf_vars ()
              PING_NEEDED [$PING_NEEDED]
                    PING4 [$PING4]
                    PING6 [$PING6]
-
-VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
  =========== IP
            GATEWAYS_IPV4 [$GATEWAYS_IPV4]
            GATEWAYS_IPV6 [$GATEWAYS_IPV6]
@@ -1758,8 +1766,11 @@ VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
                   SERVER [$SERVER]
  =========== Client
           FETCH_GATEWAYS [$FETCH_GATEWAYS]
+
+
     FETCH_SPEEDTEST_IPV4 [$FETCH_SPEEDTEST_IPV4]
     FETCH_SPEEDTEST_IPV6 [$FETCH_SPEEDTEST_IPV6]
+        SPEEDTEST_TARGET [$SPEEDTEST_TARGET]
  ---------------------------------------------------"
 }
 
@@ -2303,30 +2314,52 @@ stop_serve_gateways ()
     fi
 }
 
-fetch_wget ()
-{
-    FETCHED_GATEWAYS="$(
-        2>&1 wget -O - "http://${VIRTUAL_IPADDRESS%/*}:$VIRTUAL_PORT/${GATEWAYS_STATE_FILE##*/}"
-    )"
-}
-
 fetch_curl ()
 {
-    FETCHED_GATEWAYS="$(
-        2>&1 curl -o - "http://${VIRTUAL_IPADDRESS%/*}:$VIRTUAL_PORT/${GATEWAYS_STATE_FILE##*/}"
-    )"
+    $TIMEOUT $FETCH_TIMEOUT curl -o - "$@"
+}
+
+fetch_wget ()
+{
+    $TIMEOUT $FETCH_TIMEOUT wget -O - "$@"
+}
+
+strip_headers ()
+{
+    awk '
+        BEGIN {
+            body = 0
+        }
+        {
+            gsub(/\r/, "")
+            if (!body && $0 ~ /^[[:space:]]*$/) {
+                body = 1
+                next
+            }
+            if (body) {
+                if ($0 ~ /^\377/)
+                    next
+                if ($0 !~ /^[[:space:]]*$/) {
+                    if (first_line_done)
+                        printf "\n"
+                        printf "%s", $0
+                        first_line_done = 1
+                }
+            }
+        }
+    '
 }
 
 fetch_netcat ()
 {
-    FETCHED_GATEWAYS="$(
-        2>&1 $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$VIRTUAL_PORT" <<EOF
-GET /${GATEWAYS_STATE_FILE##*/} HTTP/1.0$CR
-Host: ${VIRTUAL_IPADDRESS%/*}$CR
+    {
+        $TIMEOUT $FETCH_TIMEOUT nc "$1" "$2" <<EOF | strip_headers
+GET ${3:-/} HTTP/1.0$CR
+Host: ${1}$CR
 Connection: close$CR
 $CR
 EOF
-    )" ||
+    } ||
     case $? in
         124)
             return 0
@@ -2343,42 +2376,22 @@ fetch_gateways ()
     RETRIES=3
     SUCCESS=1
     echo
-    say "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
+    say -n "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
+    FETCH_TIMEOUT=1
     while is_diff $COUNT $RETRIES
     do
-        $FETCH_GATEWAYS && {
+        FETCHED_GATEWAYS="$(2>&1 $FETCH_GATEWAYS)" && {
             SUCCESS=0
             break
         } || COUNT=$((COUNT + 1))
     done
 
-    is_equal $SUCCESS 0 || {
+    is_equal $SUCCESS 0 && say -p " [ OK ]" || {
+        say -p " [ ERROR ]"
         say "error: ${FETCHED_GATEWAYS:-}"
         FETCHED_GATEWAYS=""
         return 1
     } >&2
-
-    FETCHED_GATEWAYS="$(awk '
-        BEGIN {
-            body = 0
-        }
-        {
-            gsub(/\r/, "")
-            if (!body && $0 ~ /^[[:space:]]*$/) {
-                body = 1
-                next
-            }
-            if (body) {
-                if ($0 ~ /^\377/)
-                    next
-                if ($0 !~ /^[[:space:]]*$/)
-                    print $0
-            }
-        }
-    ' <<EOF
-$FETCHED_GATEWAYS
-EOF
-    )"
 
     is_not_empty "${FETCHED_GATEWAYS:-}" || {
         say "error: received empty or invalid gateway state from master (${VIRTUAL_IPADDRESS%/*})"
