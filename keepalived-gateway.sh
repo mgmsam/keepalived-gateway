@@ -185,6 +185,12 @@ is_term ()
     return "$IS_TERM"
 }
 
+check_root_access ()
+{
+    test -w / ||
+        say "error: must be run as root to manage routes and interfaces."
+}
+
 set_state ()
 {
     STATE="$1"
@@ -1802,12 +1808,6 @@ echo_conf_vars ()
  ---------------------------------------------------"
 }
 
-check_permissions ()
-{
-    test -w / ||
-        say "error: must be run as root to manage routes and interfaces."
-}
-
 run_ip ()
 {
     EXEC="$IP_CMD $@"
@@ -2431,6 +2431,7 @@ fetch_gateways ()
 main ()
 {
     EXIT_CODE=0
+    check_root_access || die
     say "switching to init mode"
     set_state "init"
     setup_core_env
@@ -2447,7 +2448,6 @@ main ()
     }
     resolve_transfer_tools
     echo_conf_vars resolve_transfer_tools
-    check_permissions
     is_equal $EXIT_CODE 0 || die
     exit
     remove_test_route || die
