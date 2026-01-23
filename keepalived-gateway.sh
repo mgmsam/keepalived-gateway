@@ -842,16 +842,22 @@ set_variables ()
         is_not_empty "${IPV4:-"${IPV6:-}"}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address"
 
-        VIRTUAL_IPADDRESS_FAMILY="${FAMILY:-}"
-        VIRTUAL_IPADDRESS="${IPV4:-${IPV6:-}}"
+        VIP_FAMILY="${FAMILY:-}"
+        VIP="${IPV4:-${IPV6:-}}"
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
         is_equal "$ROLE" "single" || is_equal "$ROLE" "unknown" ||
             say 2 "error: variable 'VIRTUAL_PORT': is empty: required for roles 'cluster, master, master-advisor, slave'"
-    } || is_port "$VIRTUAL_PORT" || {
-        VIRTUAL_PORT=""
-        say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
+    } || {
+        is_port "$VIRTUAL_PORT" && VIP_PORT="$VIRTUAL_PORT" ||
+            say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
+    }
+
+    is_empty "${VIP:+${VIP_PORT:-}}" || {
+        : "${GATEWAYS_STATE_FILE:=/tmp/keepalived-gateway/gateways.state}"
+        VIP_URL="http://${VIP%/*}:$VIP_PORT/${GATEWAYS_STATE_FILE##*/}"
+        VIP_NETCAT_ARGS="${VIP%/*} $VIP_PORT ${GATEWAYS_STATE_FILE##*/}"
     }
 }
 
@@ -1409,7 +1415,7 @@ verify_network_state ()
     }
 
     is_equal "$ROLE" "single" ||
-    case "${VIRTUAL_IPADDRESS_FAMILY:-}" in
+    case "${VIP_FAMILY:-}" in
         inet)
             ERROR="IPv4 stack or 127.0.0.1 not found"
             is_equal "$HAS_IPV4_STACK" "yes"
@@ -1434,9 +1440,9 @@ resolve_server ()
         say 127 "error: environment: $ERROR: 'sleep' not found"
     }
 
-    is_port_free "$VIRTUAL_PORT" || {
+    is_port_free "$VIP_PORT" || {
         RETURN=1
-        say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIRTUAL_PORT is already in use"
+        say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIP_PORT is already in use"
     }
 
     is_equal "$RETURN" 0 || return 0
@@ -1458,23 +1464,23 @@ resolve_server ()
     detect_netcat_server ()
     {
         # Debian
-        if check_daemon nc -l -s $LOCAL_IP -p $VIRTUAL_PORT
+        if check_daemon nc -l -s $LOCAL_IP -p $VIP_PORT
         then
-            SERVER="nc -l -s $VIRTUAL_IPADDRESS -p $VIRTUAL_PORT"
+            SERVER="nc -l -s $VIP -p $VIP_PORT"
             return 0
         fi
 
         # FreeBSD
-        if check_daemon nc -l $LOCAL_IP $VIRTUAL_PORT
+        if check_daemon nc -l $LOCAL_IP $VIP_PORT
         then
-            SERVER="nc -l $VIRTUAL_IPADDRESS $VIRTUAL_PORT"
+            SERVER="nc -l $VIP $VIP_PORT"
             return 0
         fi
 
         return 1
     }
 
-    case "${VIRTUAL_IPADDRESS_FAMILY:-}" in
+    case "${VIP_FAMILY:-}" in
         inet)
             LOCAL_IP="127.0.0.1"
             BIND_IP="$LOCAL_IP"
@@ -1499,17 +1505,17 @@ resolve_server ()
                         SERVE_GATEWAYS="serve_netcat"
                 ;;
                 uhttpd | httpd)
-                    check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
+                    check_daemon $COMMAND -f -p $BIND_IP:$VIP_PORT && {
                         SERVE_GATEWAYS="serve_httpd"
-                        is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
-                            SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
-                            SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
+                        is_equal "$VIP_FAMILY" inet &&
+                            SERVER="$COMMAND -f -p $VIP:$VIP_PORT" ||
+                            SERVER="$COMMAND -f -p [$VIP]:$VIP_PORT"
                     }
                 ;;
                 telnetd)
-                    check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
+                    check_daemon $COMMAND -F -p $VIP_PORT -b $LOCAL_IP && {
                         SERVE_GATEWAYS="serve_telnetd"
-                        SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
+                        SERVER="$COMMAND -F -p $VIP_PORT -b $VIP -l : -K"
                     }
                 ;;
             esac >/dev/null 2>&1 && {
@@ -1620,7 +1626,7 @@ probe_gateway_fetcher ()
     case "$ROLE" in
         cluster | slave)
             is_not_empty "${FETCH_GATEWAYS:-}" || {
-                if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
+                if is_equal "$VIP_FAMILY" "inet"
                 then
                     say -n "$PREFIX: probing IPv4 gateway client capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
@@ -1632,7 +1638,7 @@ probe_gateway_fetcher ()
                     is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" ||
                         $1 http [::1] IPV6
                 fi && {
-                    FETCH_GATEWAYS="$2"
+                    FETCH_GATEWAYS="$2 $VIP_TARGET"
                     say -p " [ OK ]"
                 } || RETURN=1
             }
@@ -1671,14 +1677,17 @@ resolve_client ()
             case "$COMMAND" in
                 curl)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
+                    VIP_TARGET="${VIP_URL:-}"
                     probe_client_capabilities detect_curl_client fetch_curl "http https ftp sftp ftps tftp file scp"
                 ;;
                 wget)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
+                    VIP_TARGET="${VIP_URL:-}"
                     probe_client_capabilities detect_wget_client fetch_wget "http https ftp ftps"
                 ;;
                 nc)
                     SPEEDTEST_TARGET="${SPEEDTEST_NETCAT_ARGS:-}"
+                    VIP_TARGET="${VIP_NETCAT_ARGS:-}"
                     probe_client_capabilities detect_netcat_client fetch_netcat http
                 ;;
             esac && break || continue
@@ -1724,9 +1733,9 @@ echo_conf_vars ()
           SPEEDTEST_HOST [$SPEEDTEST_HOST]
          SPEEDTEST_SCOPE [$SPEEDTEST_SCOPE]
                     ROLE [$ROLE]
-       VIRTUAL_IPADDRESS [$VIRTUAL_IPADDRESS]
-            VIRTUAL_PORT [$VIRTUAL_PORT]
-VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
+                     VIP [$VIP]
+                VIP_PORT [$VIP_PORT]
+              VIP_FAMILY [$VIP_FAMILY]
  =========== VARS
                 NET_TOOL [$NET_TOOL]
           HAS_IPV4_STACK [$HAS_IPV4_STACK]
@@ -1746,6 +1755,9 @@ VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
       SPEEDTEST_RESOURCE [$SPEEDTEST_RESOURCE]
            SPEEDTEST_URL [$SPEEDTEST_URL]
    SPEEDTEST_NETCAT_ARGS [$SPEEDTEST_NETCAT_ARGS]
+
+                 VIP_URL [$VIP_URL]
+         VIP_NETCAT_ARGS [$VIP_NETCAT_ARGS]
 
                  DO_PING [$DO_PING]
                PING_FQDN [$PING_FQDN]
@@ -1896,7 +1908,7 @@ collect_route ()
 
 is_vrrp_master ()
 {
-    is_local_ip "$VIRTUAL_IPADDRESS" "$VIRTUAL_IPADDRESS_FAMILY" >/dev/null 2>&1
+    is_local_ip "$VIP" "$VIP_FAMILY" >/dev/null 2>&1
 }
 
 get_time ()
@@ -2209,7 +2221,7 @@ sync_gateways ()
         refresh_routing_table
         return
     }
-    say "applying new gateway configuration from master (${VIRTUAL_IPADDRESS%/*})"
+    say "applying new gateway configuration from master (${VIP%/*})"
 
     for GATEWAY in $FETCHED_GATEWAYS
     do
@@ -2285,8 +2297,8 @@ serve_telnetd ()
 serve_gateways ()
 {
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
-        is_port_free "$VIRTUAL_PORT" || {
-            say "error: cannot start sync server, port $VIRTUAL_PORT is busy"
+        is_port_free "$VIP_PORT" || {
+            say "error: cannot start sync server, port $VIP_PORT is busy"
             return
         } >&2
 
@@ -2296,7 +2308,7 @@ serve_gateways ()
 
         if is_process_alive "$GATEWAY_SERVER_PID"
         then
-            say "gateway server successfully started on port $VIRTUAL_PORT"
+            say "gateway server successfully started on port $VIP_PORT"
         else
             GATEWAY_SERVER_PID=""
             say "error: gateway server failed to start (check system logs)"
@@ -2376,7 +2388,7 @@ fetch_gateways ()
     RETRIES=3
     SUCCESS=1
     echo
-    say -n "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
+    say -n "attempting to fetch gateway state from master (${VIP%/*})..."
     FETCH_TIMEOUT=1
     while is_diff $COUNT $RETRIES
     do
@@ -2394,10 +2406,10 @@ fetch_gateways ()
     } >&2
 
     is_not_empty "${FETCHED_GATEWAYS:-}" || {
-        say "error: received empty or invalid gateway state from master (${VIRTUAL_IPADDRESS%/*})"
+        say "error: received empty or invalid gateway state from master (${VIP%/*})"
         return 1
     } >&2
-    say "received remote state from master (${VIRTUAL_IPADDRESS%/*}): [$FETCHED_GATEWAYS]"
+    say "received remote state from master (${VIP%/*}): [$FETCHED_GATEWAYS]"
 }
 
 main ()
@@ -2435,7 +2447,7 @@ main ()
     ALIVE_ROUTES=""
     GATEWAY_SERVER_PID=""
 
-    if is_empty "${VIRTUAL_IPADDRESS:-}"
+    if is_empty "${VIP:-}"
     then
         echo
         say "switching to single mode"
@@ -2456,7 +2468,7 @@ main ()
                     ;;
                     *)
                         echo
-                        say "virtual IP detected on this host: '$VIRTUAL_IPADDRESS'"
+                        say "virtual IP detected on this host: '$VIP'"
                         say "switching to $ROLE mode"
                         set_state "$ROLE"
                     ;;
@@ -2475,7 +2487,7 @@ main ()
                         esac
                         is_equal "$STATE" "slave" || {
                             echo
-                            say "virtual IP not found on this host: '$VIRTUAL_IPADDRESS'"
+                            say "virtual IP not found on this host: '$VIP'"
                             say "switching to slave mode"
                             set_state "slave"
                         }
