@@ -876,7 +876,7 @@ resolve_dependencies ()
             list[++count] = value
         }
     '
-    AWK_NATURAL_SORT='
+    AWK_NATURAL_SORT_FUNC='
         function get_nat_key(s, res, i, c, n) {
             res = ""
             i = 1
@@ -897,38 +897,94 @@ resolve_dependencies ()
             }
             return res
         }
-        END {
-            if (count == 0) exit 0
-            for (i = 1; i <= count; i++) keys[i] = get_nat_key(list[i])
-            for (i = 2; i <= count; i++) {
-                for (j = i; j > 1 && keys[j-1] > keys[j]; j--) {
-                    tmp = list[j]
-                    list[j] = list[j-1]
-                    list[j-1] = tmp
-                    tk = keys[j]
-                    keys[j] = keys[j-1]
-                    keys[j-1] = tk
-                }
+    '
+    AWK_NATURAL_SORT='
+        if (count == 0)
+            exit 0
+        for (i = 1; i <= count; i++)
+            keys[i] = get_nat_key(list[i])
+        for (i = 2; i <= count; i++) {
+            for (j = i; j > 1 && keys[j-1] > keys[j]; j--) {
+                tmp = list[j]
+                list[j] = list[j-1]
+                list[j-1] = tmp
+                tk = keys[j]
+                keys[j] = keys[j-1]
+                keys[j-1] = tk
             }
-            for (i = 1; i <= count; i++) print list[i]
+        }
+        for (i = 1; i <= count; i++)
+            print list[i]
+        for (i in list)
+            delete list[i]
+        for (i in keys)
+            delete keys[i]
+    '
+
+    AWK_NATURAL_SORT_END='
+        END {
+            '"$AWK_NATURAL_SORT"'
         }
     '
+
     AWK_ADDRESS_PARSER='
+        '"$AWK_NATURAL_SORT_FUNC"'
         /inet6?/ {
+            current_family = ($0 ~ /inet6/) ? 6 : 4
+
+            if (family == 4 && current_family == 6)
+                next
+
+            if (family == 6 && current_family == 4)
+                next
+
             if ($0 ~ /addr:/) {
                 split($0, line, "addr:")
                 split(line[2], ip_mask_zone, " ")
                 address = ip_mask_zone[1]
-            } else {
+            }
+            else {
                 address = $2
             }
+
             if (address) {
                 split(address, ip, "[/%]")
                 value = ip[1]
-                '"$AWK_UNIQUE_COLLECT"'
+                if (current_family == 4) {
+                    if (!seen4[value]) {
+                        seen4[value] = 1
+                        list4[++count4] = value
+                    }
+                } else {
+                    if (!seen6[value]) {
+                        seen6[value] = 1
+                        list6[++count6] = value
+                    }
+                }
             }
         }
-        '"$AWK_NATURAL_SORT"'
+
+        END {
+            if (substr(family, 1, 1) == "6") {
+                for (i in list6)
+                    list[i] = list6[i]
+                    count = count6
+                    '"$AWK_NATURAL_SORT"'
+                for (i in list4)
+                    list[i] = list4[i]
+                    count = count4
+                    '"$AWK_NATURAL_SORT"'
+            } else {
+                for (i in list4)
+                    list[i] = list4[i]
+                    count = count4
+                    '"$AWK_NATURAL_SORT"'
+                for (i in list6)
+                    list[i] = list6[i]
+                    count = count6
+                    '"$AWK_NATURAL_SORT"'
+            }
+        }
     '
 
     if type ip >/dev/null 2>&1
@@ -978,24 +1034,6 @@ resolve_dependencies ()
             esac
         }
 
-        show_addresses ()
-        {
-            ip_family "${1:-}" address show 2>/dev/null | awk "$AWK_ADDRESS_PARSER"
-        }
-
-        show_interfaces ()
-        {
-            ip_family "${1:-}" link show 2>/dev/null | awk '
-                /^[0-9]+:/ {
-                    value = $2
-                    sub(/:$/, "", value)
-                    sub(/@.*/, "", value)
-                    '"$AWK_UNIQUE_COLLECT"'
-                }
-                '"$AWK_NATURAL_SORT"'
-            '
-        }
-
         show_routes ()
         {
             ip_family "${1:-}" route show
@@ -1006,23 +1044,57 @@ resolve_dependencies ()
             ip_family "${1:-}" route "$1" $2
         }
 
+        show_addresses ()
+        {
+            FAMILY="${1:--46}"
+            FAMILY="${FAMILY#-}"
+            ip address show 2>/dev/null | awk '
+                BEGIN {
+                    family = '"$FAMILY"'
+                }
+                '"$AWK_ADDRESS_PARSER"'
+            '
+        }
+
+        show_interfaces ()
+        {
+            ip link show 2>/dev/null | awk '
+                '"$AWK_NATURAL_SORT_FUNC"'
+                /^[0-9]+:/ {
+                    value = $2
+                    sub(/:$/, "", value)
+                    sub(/@.*/, "", value)
+                    '"$AWK_UNIQUE_COLLECT"'
+                }
+                '"$AWK_NATURAL_SORT_END"'
+            '
+        }
+
     elif type ifconfig >/dev/null 2>&1
     then
         NET_TOOL="ifconfig"
         show_addresses ()
         {
-            ifconfig -a 2>/dev/null | awk "$AWK_ADDRESS_PARSER"
+            FAMILY="${1:--46}"
+            FAMILY="${FAMILY#-}"
+            ifconfig -a 2>/dev/null | awk '
+                BEGIN {
+                    family = '"$FAMILY"'
+                }
+                '"$AWK_ADDRESS_PARSER"'
+            '
         }
 
         show_interfaces ()
         {
             ifconfig -a 2>/dev/null | awk '
+                '"$AWK_NATURAL_SORT_FUNC"'
                 /^[a-zA-Z0-9]/ {
                     value = $1
                     sub(/:$/, "", value)
                     '"$AWK_UNIQUE_COLLECT"'
                 }
-                '"$AWK_NATURAL_SORT"'
+                '"$AWK_NATURAL_SORT_END"'
             '
         }
     else
@@ -1032,14 +1104,13 @@ resolve_dependencies ()
     show_ports ()
     {
         netstat -an 2>/dev/null | awk '
+            '"$AWK_NATURAL_SORT_FUNC"'
             $1 !~ /^tcp|^udp/ {
                 next
             }
-
             $1 ~ /^tcp/ && $6 !~ /LISTEN/ {
                 next
             }
-
             {
                 value = $4
                 while (sub(/.*[:.]/, "", value))
@@ -1048,7 +1119,7 @@ resolve_dependencies ()
                     '"$AWK_UNIQUE_COLLECT"'
                 }
             }
-            '"$AWK_NATURAL_SORT"'
+            '"$AWK_NATURAL_SORT_END"'
         '
     }
 
@@ -1064,7 +1135,8 @@ resolve_dependencies ()
         then
             show_ports ()
             {
-                ss -Hnuta 2>/dev/null | awk '
+                ss -Hnutl 2>/dev/null | awk '
+                    '"$AWK_NATURAL_SORT_FUNC"'
                     $1 !~ /^tcp|^udp/ {
                         next
                     }
@@ -1075,7 +1147,7 @@ resolve_dependencies ()
                             '"$AWK_UNIQUE_COLLECT"'
                         }
                     }
-                    '"$AWK_NATURAL_SORT"'
+                    '"$AWK_NATURAL_SORT_END"'
                 '
             }
         elif type netstat >/dev/null 2>&1
@@ -1113,6 +1185,7 @@ resolve_dependencies ()
                             }
                             return d
                         }
+
                         $4 ~ /^'"$STATE_FILTER"'$/ && $2 ~ /:[0-9A-F]+$/ {
                             sub(/^[^:]+:/, "", $2)
                             $1 = hex2dec($2)
@@ -1120,11 +1193,12 @@ resolve_dependencies ()
                         }
                     ' "$i"
                 done | awk '
+                    '"$AWK_NATURAL_SORT_FUNC"'
                     {
                         value = $1
                         '"$AWK_UNIQUE_COLLECT"'
                     }
-                    '"$AWK_NATURAL_SORT"'
+                    '"$AWK_NATURAL_SORT_END"'
                 '
             }
         else
@@ -2534,7 +2608,11 @@ main ()
     resolve_transfer_tools
     echo_conf_vars resolve_transfer_tools
     is_equal $EXIT_CODE 0 || die
+
+    show_addresses
     show_routes
+    show_ports
+
     exit
     remove_test_route || die
     say "initialization complete, system ready"
