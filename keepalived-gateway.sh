@@ -857,7 +857,7 @@ set_variables ()
     is_empty "${VIP:+${VIP_PORT:-}}" || {
         : "${GATEWAYS_STATE_FILE:=/tmp/keepalived-gateway/gateways.state}"
         VIP_URL="http://${VIP%/*}:$VIP_PORT/${GATEWAYS_STATE_FILE##*/}"
-        VIP_NETCAT_ARGS="${VIP%/*} $VIP_PORT ${GATEWAYS_STATE_FILE##*/}"
+        VIP_NETCAT_ARGS="${VIP%/*} $VIP_PORT /${GATEWAYS_STATE_FILE##*/}"
     }
 }
 
@@ -1480,6 +1480,16 @@ resolve_server ()
         return 1
     }
 
+    check_gateways_state_file ()
+    {
+        is_dir "${GATEWAYS_STATE_FILE%/*}" ||
+            ERROR="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" &&
+            ERROR="$(2>&1 > "$GATEWAYS_STATE_FILE")" || {
+                say "error: $ERROR"
+                return $EXIT_CODE
+            }
+    }
+
     case "${VIP_FAMILY:-}" in
         inet)
             LOCAL_IP="127.0.0.1"
@@ -1526,8 +1536,14 @@ resolve_server ()
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         fi || say 0 -p " [ FAILED ]"
     done
-    is_not_empty "${SERVE_GATEWAYS:-}" ||
-        say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
+    case "${SERVE_GATEWAYS:-}" in
+        "")
+            say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
+        ;;
+        serve_httpd | serve_telnetd )
+            check_gateways_state_file
+        ;;
+    esac
 }
 
 detect_curl_client ()
@@ -1778,7 +1794,7 @@ echo_conf_vars ()
                   SERVER [$SERVER]
  =========== Client
           FETCH_GATEWAYS [$FETCH_GATEWAYS]
-
+              VIP_TARGET [$VIP_TARGET]
 
     FETCH_SPEEDTEST_IPV4 [$FETCH_SPEEDTEST_IPV4]
     FETCH_SPEEDTEST_IPV6 [$FETCH_SPEEDTEST_IPV6]
