@@ -1849,7 +1849,7 @@ deprecated_check_base_dependencies ()
 
 check_permissions ()
 {
-    is_equal "$(id -u)" 0 ||
+    test -w / ||
         say "error: must be run as root to manage routes and interfaces."
 }
 
