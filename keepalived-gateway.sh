@@ -1492,11 +1492,11 @@ resolve_server ()
             case "$COMMAND" in
                 nc)
                     detect_netcat_server &&
-                        SERVE_GATEWAYS="serve_gateways_netcat"
+                        SERVE_GATEWAYS="serve_netcat"
                 ;;
                 uhttpd | httpd)
                     check_daemon $COMMAND -f -p $BIND_IP:$VIRTUAL_PORT && {
-                        SERVE_GATEWAYS="serve_gateways_httpd"
+                        SERVE_GATEWAYS="serve_httpd"
                         is_equal "$VIRTUAL_IPADDRESS_FAMILY" inet &&
                             SERVER="$COMMAND -f -p $VIRTUAL_IPADDRESS:$VIRTUAL_PORT" ||
                             SERVER="$COMMAND -f -p [$VIRTUAL_IPADDRESS]:$VIRTUAL_PORT"
@@ -1504,7 +1504,7 @@ resolve_server ()
                 ;;
                 telnetd)
                     check_daemon $COMMAND -F -p $VIRTUAL_PORT -b $LOCAL_IP && {
-                        SERVE_GATEWAYS="serve_gateways_telnetd"
+                        SERVE_GATEWAYS="serve_telnetd"
                         SERVER="$COMMAND -F -p $VIRTUAL_PORT -b $VIRTUAL_IPADDRESS -l : -K"
                     }
                 ;;
@@ -2238,7 +2238,7 @@ is_process_alive ()
     is_dir "/proc/$1"
 }
 
-serve_gateways_netcat ()
+serve_netcat ()
 {
     trap '
         trap - 0
@@ -2261,12 +2261,12 @@ EOF
     done
 }
 
-serve_gateways_httpd ()
+serve_httpd ()
 {
     $SERVER -h "${GATEWAYS_STATE_FILE%/*}"
 }
 
-serve_gateways_telnetd ()
+serve_telnetd ()
 {
     $SERVER -f "$GATEWAYS_STATE_FILE"
 }
@@ -2317,7 +2317,7 @@ fetch_curl ()
     )"
 }
 
-fetch_nc ()
+fetch_netcat ()
 {
     FETCHED_GATEWAYS="$(
         2>&1 $TIMEOUT 1 nc "${VIRTUAL_IPADDRESS%/*}" "$VIRTUAL_PORT" <<EOF
@@ -2346,7 +2346,7 @@ fetch_gateways ()
     say "attempting to fetch gateway state from master (${VIRTUAL_IPADDRESS%/*})..."
     while is_diff $COUNT $RETRIES
     do
-        "$FETCH_GATEWAYS" && {
+        $FETCH_GATEWAYS && {
             SUCCESS=0
             break
         } || COUNT=$((COUNT + 1))
