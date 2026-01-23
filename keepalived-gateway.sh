@@ -2359,12 +2359,21 @@ fetch_gateways ()
     } >&2
 
     FETCHED_GATEWAYS="$(awk '
+        BEGIN {
+            body = 0
+        }
         {
             gsub(/\r/, "")
-            if ($0 ~ /^\377/) next
-            if ($0 ~ /^(GET|Host|User-Agent|Accept|Connection|HTTP\/)/) next
-            if ($0 ~ /^[[:space:]]*$/) next
-            print $0
+            if (!body && $0 ~ /^[[:space:]]*$/) {
+                body = 1
+                next
+            }
+            if (body) {
+                if ($0 ~ /^\377/)
+                    next
+                if ($0 !~ /^[[:space:]]*$/)
+                    print $0
+            }
         }
     ' <<EOF
 $FETCHED_GATEWAYS
