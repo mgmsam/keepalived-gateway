@@ -952,9 +952,44 @@ resolve_dependencies ()
             '
         }
 
+        IP_IPV4=""
+        IP_IPV6=""
+        for i in -4 --inet "-f inet"
+        do
+            if ip $i route show
+            then
+                IP_IPV4="$i"
+                break
+            fi
+        done >/dev/null 2>&1
+
+        for i in -6 --inet6 "-f inet6"
+        do
+            if ip $i route show
+            then
+                IP_IPV6="$i"
+                break
+            fi
+        done >/dev/null 2>&1
+
         show_routes ()
         {
-            ip route show
+            case "${1:-}" in
+                -4)
+                    ip ${IP_IPV4:-} route show
+                ;;
+                -6)
+                    ip ${IP_IPV6:-} route show
+                ;;
+                -64)
+                    ip ${IP_IPV6:-} route show
+                    ip ${IP_IPV4:-} route show
+                ;;
+                "" | -46)
+                    ip ${IP_IPV4:-} route show
+                    ip ${IP_IPV6:-} route show
+                ;;
+            esac
         }
 
         control_route ()
@@ -1824,6 +1859,8 @@ echo_conf_vars ()
                    PING4 [$PING4]
                    PING6 [$PING6]
  =========== NET TOOL
+                 IP_IPV4 [$IP_IPV4]
+                 IP_IPV6 [$IP_IPV6]
             NETSTAT_IPV4 [$NETSTAT_IPV4]
             NETSTAT_IPV6 [$NETSTAT_IPV6]
  =========== IP
