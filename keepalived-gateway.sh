@@ -738,7 +738,7 @@ parse_resource ()
     esac
 }
 
-set_variables ()
+verify_config_syntax ()
 {
     case "${ROLE:=single}" in
         cluster | master | master-advisor | single)
@@ -2436,8 +2436,8 @@ main ()
     set_state "init"
     setup_core_env
     say "loading configuration..."
-    include_config && set_variables
-    echo_conf_vars set_variables
+    include_config && verify_config_syntax
+    echo_conf_vars verify_config_syntax
     resolve_dependencies || {
         echo_conf_vars resolve_dependencies
         die
