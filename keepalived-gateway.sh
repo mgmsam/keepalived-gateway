@@ -934,14 +934,58 @@ resolve_dependencies ()
     if type ip >/dev/null 2>&1
     then
         NET_TOOL="ip"
+
+        IP4=""
+        IP6=""
+        for i in -4 --inet "-f inet"
+        do
+            if ip $i route show
+            then
+                IP4="ip $i"
+                break
+            fi
+        done >/dev/null 2>&1
+        for i in -6 --inet6 "-f inet6"
+        do
+            if ip $i route show
+            then
+                IP6="ip $i"
+                break
+            fi
+        done >/dev/null 2>&1
+        IP4="${IP4:-ip}"
+        IP6="${IP6:-ip}"
+
+        ip_family ()
+        {
+            FAMILY="${1:-}"
+            shift
+            case "${FAMILY:-}" in
+                -4)
+                    $IP4 "$@"
+                ;;
+                -6)
+                    $IP6 "$@"
+                ;;
+                -64)
+                    $IP6 "$@"
+                    $IP4 "$@"
+                ;;
+                *)
+                    $IP4 "$@"
+                    $IP6 "$@"
+                ;;
+            esac
+        }
+
         show_addresses ()
         {
-            ip address show 2>/dev/null | awk "$AWK_ADDRESS_PARSER"
+            ip_family "${1:-}" address show 2>/dev/null | awk "$AWK_ADDRESS_PARSER"
         }
 
         show_interfaces ()
         {
-            ip link show 2>/dev/null | awk '
+            ip_family "${1:-}" link show 2>/dev/null | awk '
                 /^[0-9]+:/ {
                     value = $2
                     sub(/:$/, "", value)
@@ -952,49 +996,14 @@ resolve_dependencies ()
             '
         }
 
-        IP_IPV4=""
-        IP_IPV6=""
-        for i in -4 --inet "-f inet"
-        do
-            if ip $i route show
-            then
-                IP_IPV4="$i"
-                break
-            fi
-        done >/dev/null 2>&1
-
-        for i in -6 --inet6 "-f inet6"
-        do
-            if ip $i route show
-            then
-                IP_IPV6="$i"
-                break
-            fi
-        done >/dev/null 2>&1
-
         show_routes ()
         {
-            case "${1:-}" in
-                -4)
-                    ip ${IP_IPV4:-} route show
-                ;;
-                -6)
-                    ip ${IP_IPV6:-} route show
-                ;;
-                -64)
-                    ip ${IP_IPV6:-} route show
-                    ip ${IP_IPV4:-} route show
-                ;;
-                "" | -46)
-                    ip ${IP_IPV4:-} route show
-                    ip ${IP_IPV6:-} route show
-                ;;
-            esac
+            ip_family "${1:-}" route show
         }
 
         control_route ()
         {
-            ip route "$1" $2
+            ip_family "${1:-}" route "$1" $2
         }
 
     elif type ifconfig >/dev/null 2>&1
@@ -1125,22 +1134,21 @@ resolve_dependencies ()
     then
         if type netstat >/dev/null 2>&1
         then
-            NETSTAT_IPV4=""
-            NETSTAT_IPV6=""
+            NETSTAT4=""
+            NETSTAT6=""
             for i in -4 --inet "-f inet"
             do
                 if netstat $i -rn
                 then
-                    NETSTAT_IPV4="$i"
+                    NETSTAT4="$i"
                     break
                 fi
             done >/dev/null 2>&1
-
             for i in -6 --inet6 "-f inet6"
             do
                 if netstat $i -rn
                 then
-                    NETSTAT_IPV6="$i"
+                    NETSTAT6="$i"
                     break
                 fi
             done >/dev/null 2>&1
@@ -1149,18 +1157,18 @@ resolve_dependencies ()
             {
                 case "${1:-}" in
                     -4)
-                        netstat ${NETSTAT_IPV4:-} -rn
+                        netstat ${NETSTAT4:-} -rn
                     ;;
                     -6)
-                        netstat ${NETSTAT_IPV6:-} -rn
+                        netstat ${NETSTAT6:-} -rn
                     ;;
                     -64)
-                        netstat ${NETSTAT_IPV6:-} -rn
-                        netstat ${NETSTAT_IPV4:-} -rn
+                        netstat ${NETSTAT6:-} -rn
+                        netstat ${NETSTAT4:-} -rn
                     ;;
                     "" | -46)
-                        netstat ${NETSTAT_IPV4:-} -rn
-                        netstat ${NETSTAT_IPV6:-} -rn
+                        netstat ${NETSTAT4:-} -rn
+                        netstat ${NETSTAT6:-} -rn
                     ;;
                 esac
             }
@@ -1859,10 +1867,10 @@ echo_conf_vars ()
                    PING4 [$PING4]
                    PING6 [$PING6]
  =========== NET TOOL
-                 IP_IPV4 [$IP_IPV4]
-                 IP_IPV6 [$IP_IPV6]
-            NETSTAT_IPV4 [$NETSTAT_IPV4]
-            NETSTAT_IPV6 [$NETSTAT_IPV6]
+                     IP4 [$IP4]
+                     IP6 [$IP6]
+                NETSTAT4 [$NETSTAT4]
+                NETSTAT6 [$NETSTAT6]
  =========== IP
            GATEWAYS_IPV4 [$GATEWAYS_IPV4]
            GATEWAYS_IPV6 [$GATEWAYS_IPV6]
