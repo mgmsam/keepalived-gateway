@@ -1174,7 +1174,7 @@ resolve_dependencies ()
         is_equal "$DO_SPEEDTEST" "yes" &&
         is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
             PING_NEEDED="yes"
-            type ping >/dev/null 2>&1 &&
+            type ping >/dev/null 2>&1 ||
                 say 127 "error: environment: gateway check impossible: 'ping' not found"
         }
     }
@@ -1569,183 +1569,134 @@ resolve_server ()
 
 detect_curl_client ()
 {
-    check_curl ()
-    {
-        say -n "$PREFIX: probing $3 $4 client capability..."
-        STATE="$(2>&1 curl $1://$2:0 || :)"
-        case "${STATE:-}" in
-            *connect*)
-                say -p " [ OK ]"
-                return 0
-            ;;
-            *Protocol*)
-                say -p " [unsupported scheme ‘$1’]"
-                return 1
-            ;;
-            *URL* | *resolve*)
-                say -p " [$3 unsupported]"
-                return 2
-            ;;
-            *)
-                say -p " [undefined error]"
-                return 3
-        esac
-    }
-
-    is_equal "$DO_SPEEDTEST" "no" ||
-    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
-    case "$SPEEDTEST_SCHEME" in
-        http | https | ftp | sftp | ftps | tftp | file | scp)
-            is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
-                is_empty "${SPEEDTEST_IPV4:-}" || {
-                    check_curl "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 speedtest &&
-                        FETCH_SPEEDTEST_IPV4="fetch_curl" || RETURN=1
-                }
-            }
-            is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
-                is_empty "${SPEEDTEST_IPV6:-}" || {
-                    check_curl "$SPEEDTEST_SCHEME" [::1] IPv6 speedtest &&
-                        FETCH_SPEEDTEST_IPV6="fetch_curl" || RETURN=1
-                }
-            }
+    STATE="$(2>&1 curl $1://$2:1 || :)"
+    case "${STATE:-}" in
+        *connect*)
+            return 0
+        ;;
+        *Protocol*)
+            say -p " [unsupported scheme ‘$1’]"
+            return 1
+        ;;
+        *URL* | *resolve*)
+            say -p " [$3 unsupported]"
+            return 2
         ;;
         *)
-            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
-        ;;
+            say -p " [undefined error]"
+            return 3
     esac
-
-    case "$ROLE" in
-        cluster | slave)
-            is_not_empty "${FETCH_GATEWAYS:-}" || {
-                if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
-                then
-                    check_curl http 127.0.0.1 IPV4 gateway
-                else
-                    check_curl http [::1] IPV6 gateway
-                fi && FETCH_GATEWAYS="fetch_curl" || RETURN=1
-            }
-        ;;
-    esac
-    return $RETURN
 }
 
 detect_wget_client ()
 {
-    check_wget ()
-    {
-        say -n "$PREFIX: probing $3 $4 client capability..."
-        STATE="$(2>&1 wget $1://$2:0 || :)"
-        case "${STATE:-}" in
-            *Connection*)
-                say -p " [ OK ]"
-                return 0
-            ;;
-            *family* | *socket*)
-                say -p " [$3 unsupported]"
-                return 1
-            ;;
-            *support* | *http* | *ftp*)
-                say -p " [unsupported scheme ‘$1’]"
-                return 2
-            ;;
-            *)
-                say -p " [undefined error]"
-                return 3
-        esac
-    }
-
-    is_equal "$DO_SPEEDTEST" "no" ||
-    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
-    case "$SPEEDTEST_SCHEME" in
-        http | https | ftp | ftps)
-            is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
-                is_empty "${SPEEDTEST_IPV4:-}" || {
-                    check_wget "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 speedtest &&
-                        FETCH_SPEEDTEST_IPV4="fetch_wget" || RETURN=1
-                }
-            }
-            is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
-                is_empty "${SPEEDTEST_IPV6:-}" || {
-                    check_wget "$SPEEDTEST_SCHEME" [::1] IPv6 speedtest &&
-                        FETCH_SPEEDTEST_IPV6="fetch_wget" || RETURN=1
-                }
-            }
+    STATE="$(2>&1 wget $1://$2:1 || :)"
+    case "${STATE:-}" in
+        *Connection*)
+            return 0
+        ;;
+        *family* | *socket*)
+            say -p " [$3 unsupported]"
+            return 1
+        ;;
+        *support* | *http* | *ftp*)
+            say -p " [unsupported scheme ‘$1’]"
+            return 2
         ;;
         *)
-            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
-        ;;
+            say -p " [undefined error]"
+            return 3
     esac
-
-    case "$ROLE" in
-        cluster | slave)
-            is_not_empty "${FETCH_GATEWAYS:-}" || {
-                if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
-                then
-                    check_wget http 127.0.0.1 IPV4 gateway
-                else
-                    check_wget http [::1] IPV6 gateway
-                fi && FETCH_GATEWAYS="fetch_wget" || RETURN=1
-            }
-        ;;
-    esac
-    return $RETURN
 }
 
 detect_netcat_client ()
 {
-    check_netcat ()
-    {
-        say -n "$PREFIX: probing $3 $4 client capability..."
-        STATE="$(2>&1 nc $2 0 || :)"
-        case "${STATE:-}" in
-            "" | *Connection*)
-                say -p " [ OK ]"
-                return 0
-            ;;
-            *family* | *resolve*)
-                say -p " [$3 unsupported]"
-                return 1
-            ;;
-            *)
-                say -p " [undefined error]"
-                return 3
-        esac
-    }
-
-    is_equal "$DO_SPEEDTEST" "no" ||
-    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
-    case "$SPEEDTEST_SCHEME" in
-        http)
-            is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
-                is_empty "${SPEEDTEST_IPV4:-}" || {
-                    check_netcat "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 speedtest &&
-                        FETCH_SPEEDTEST_IPV4="fetch_netcat" || RETURN=1
-                }
-            }
-            is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
-                is_empty "${SPEEDTEST_IPV6:-}" || {
-                    check_netcat "$SPEEDTEST_SCHEME" [::1] IPv6 speedtest &&
-                        FETCH_SPEEDTEST_IPV6="fetch_netcat" || RETURN=1
-                }
-            }
+    STATE="$(2>&1 nc $2 1 || :)"
+    case "${STATE:-}" in
+        "" | *Connection*)
+            return 0
+        ;;
+        *family* | *resolve*)
+            say -p " [$3 unsupported]"
+            return 1
         ;;
         *)
-            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
+            say -p " [undefined error]"
+            return 3
+    esac
+}
+
+is_supported_scheme ()
+{
+    case " $1 " in
+        *" $SPEEDTEST_SCHEME "*)
+            return 0
         ;;
     esac
+    return 1
+}
 
+probe_speedtest_fetcher ()
+{
+    is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
+        is_empty "${SPEEDTEST_IPV4:-}" || {
+            say -n "$PREFIX: probing IPv4 speedtest client capability..."
+            $1 "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 && {
+                FETCH_SPEEDTEST_IPV4="$2"
+                say -p " [ OK ]"
+            } || RETURN=1
+        }
+    }
+    is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
+        is_empty "${SPEEDTEST_IPV6:-}" || {
+            say -n "$PREFIX: probing IPv6 speedtest client capability..."
+            $1 "$SPEEDTEST_SCHEME" [::1] IPv6 && {
+                FETCH_SPEEDTEST_IPV6="$2"
+                say -p " [ OK ]"
+            } || RETURN=1
+        }
+    }
+}
+
+probe_gateway_fetcher ()
+{
     case "$ROLE" in
         cluster | slave)
             is_not_empty "${FETCH_GATEWAYS:-}" || {
                 if is_equal "$VIRTUAL_IPADDRESS_FAMILY" "inet"
                 then
-                    check_netcat http 127.0.0.1 IPV4 gateway
+                    say -n "$PREFIX: probing IPv4 gateway client capability..."
+                    is_equal "${SPEEDTEST_SCHEME:-}" http &&
+                    is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" ||
+                        $1 http 127.0.0.1 IPV4
                 else
-                    check_netcat http [::1] IPV6 gateway
-                fi && FETCH_GATEWAYS="fetch_netcat" || RETURN=1
+                    say -n "$PREFIX: probing IPv6 gateway client capability..."
+                    is_equal "${SPEEDTEST_SCHEME:-}" http &&
+                    is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" ||
+                        $1 http [::1] IPV6
+                fi && {
+                    FETCH_GATEWAYS="$2"
+                    say -p " [ OK ]"
+                } || RETURN=1
             }
         ;;
     esac
+}
+
+probe_client_capabilities ()
+{
+    RETURN=0
+    PREFIX="environment: role '$ROLE': found '$COMMAND'"
+    is_equal "$DO_SPEEDTEST" "no" ||
+    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
+        if is_supported_scheme "$3"
+        then
+            probe_speedtest_fetcher $1 $2
+        else
+            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
+        fi
+
+    probe_gateway_fetcher $1 $2
     return $RETURN
 }
 
@@ -1760,17 +1711,15 @@ resolve_client ()
     do
         if type "$COMMAND" >/dev/null 2>&1
         then
-            RETURN=0
-            PREFIX="environment: role '$ROLE': found '$COMMAND'"
             case "$COMMAND" in
                 curl)
-                    detect_curl_client
+                    probe_client_capabilities detect_curl_client fetch_curl "http https ftp sftp ftps tftp file scp"
                 ;;
                 wget)
-                    detect_wget_client
+                    probe_client_capabilities detect_wget_client fetch_wget "http https ftp ftps"
                 ;;
                 nc)
-                    detect_netcat_client
+                    probe_client_capabilities detect_netcat_client fetch_netcat http
                 ;;
             esac && break || continue
         else
@@ -1826,6 +1775,7 @@ echo_conf_vars ()
             PROC_NET_TCP [$PROC_NET_TCP]
                 LOCAL_IP [$LOCAL_IP]
 
+            DO_SPEEDTEST [$DO_SPEEDTEST]
         SPEEDTEST_SCHEME [$SPEEDTEST_SCHEME]
           SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
           SPEEDTEST_IPV4 [$SPEEDTEST_IPV4]
@@ -1834,6 +1784,7 @@ echo_conf_vars ()
     SPEEDTEST_URL_PREFIX [$SPEEDTEST_URL_PREFIX]
           SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
 
+                 DO_PING [$DO_PING]
                PING_FQDN [$PING_FQDN]
                PING_IPV4 [$PING_IPV4]
                PING_IPV6 [$PING_IPV6]
@@ -1849,12 +1800,13 @@ VIRTUAL_IPADDRESS_FAMILY [$VIRTUAL_IPADDRESS_FAMILY]
             METRICS_IPV6 [$METRICS_IPV6]
                   IFACES [$IFACES]
 
- =========== Web Server
+ =========== Server
           SERVE_GATEWAYS [$SERVE_GATEWAYS]
                   SERVER [$SERVER]
- =========== Web Client
+ =========== Client
           FETCH_GATEWAYS [$FETCH_GATEWAYS]
-                  CLIENT [$CLIENT]
+    FETCH_SPEEDTEST_IPV4 [$FETCH_SPEEDTEST_IPV4]
+    FETCH_SPEEDTEST_IPV6 [$FETCH_SPEEDTEST_IPV6]
  ---------------------------------------------------"
 }
 
