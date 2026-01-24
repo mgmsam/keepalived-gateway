@@ -1229,22 +1229,33 @@ resolve_dependencies ()
 
             show_routes ()
             {
-                case "${1:-}" in
-                    -4)
-                        netstat ${NETSTAT4:-} -rn
+                case "${NETSTAT4:+${NETSTAT6:-}}" in
+                    "")
+                        netstat ${NETSTAT4:-${NETSTAT6:-}} -rn
                     ;;
-                    -6)
-                        netstat ${NETSTAT6:-} -rn
+                    *)
+                        case "${1:-}" in
+                            -4)
+                                netstat $NETSTAT4 -rn
+                            ;;
+                            -6)
+                                netstat $NETSTAT6 -rn
+                            ;;
+                            -64)
+                                netstat $NETSTAT6 -rn
+                                netstat $NETSTAT4 -rn
+                            ;;
+                            -46 | "")
+                                netstat $NETSTAT4 -rn
+                                netstat $NETSTAT6 -rn
+                            ;;
+                        esac
                     ;;
-                    -64)
-                        netstat ${NETSTAT6:-} -rn
-                        netstat ${NETSTAT4:-} -rn
-                    ;;
-                    "" | -46)
-                        netstat ${NETSTAT4:-} -rn
-                        netstat ${NETSTAT6:-} -rn
-                    ;;
-                esac
+                esac | awk '
+                    $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
+                        print $1, $2, $NF
+                    }
+                '
             }
         else
             say 127 "error: environment: routing table check impossible: 'netstat' not found"
