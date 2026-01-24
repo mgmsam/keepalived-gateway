@@ -1037,7 +1037,7 @@ resolve_dependencies ()
 
         show_routes ()
         {
-            ip_family "${1:-}" route show
+            ip_family "${1:-}" route show ${2:-}
         }
 
         control_route ()
@@ -1227,15 +1227,46 @@ resolve_dependencies ()
                     break
                 fi
             done >/dev/null 2>&1
-
             show_routes ()
             {
+                case "${1:-}" in
+                    -[46] | -46 | -64)
+                        FAMILY="$1"
+                        DESTINATION="${2:-}"
+                    ;;
+                    *)
+                        FAMILY=""
+                        DESTINATION="${1:-}"
+                    ;;
+                esac
+                case "${DESTINATION:-}" in
+                    *:*)
+                        case "${FAMILY:-}" in
+                            "" | *6*)
+                                FAMILY="-6"
+                            ;;
+                            -4)
+                                return
+                            ;;
+                        esac
+                    ;;
+                    *.*)
+                        case "${FAMILY:-}" in
+                            "" | *4*)
+                                FAMILY="-4"
+                            ;;
+                            -6)
+                                return
+                            ;;
+                        esac
+                    ;;
+                esac
                 case "${NETSTAT4:+${NETSTAT6:-}}" in
                     "")
                         netstat ${NETSTAT4:-${NETSTAT6:-}} -rn
                     ;;
                     *)
-                        case "${1:-}" in
+                        case "${FAMILY:-}" in
                             -4)
                                 netstat $NETSTAT4 -rn
                             ;;
@@ -1253,7 +1284,22 @@ resolve_dependencies ()
                         esac
                     ;;
                 esac | awk '
+                    BEGIN {
+                        destination = "'"${DESTINATION:-}"'"
+                    }
                     $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
+                        if (destination != "") {
+                            match_found = "no"
+                            if (destination == $1) {
+                                match_found = "yes"
+                            } else if ((destination == "0.0.0.0" || destination == "::/0") && ($1 == "default")) {
+                                match_found = "yes"
+                            } else if ((destination == "default") && ($1 == "0.0.0.0" || $1 == "::/0")) {
+                                match_found = "yes"
+                            }
+                            if (match_found != "yes")
+                                next
+                        }
                         print $1, $2, $NF
                     }
                 '
@@ -2636,10 +2682,10 @@ main ()
     echo_conf_vars resolve_transfer_tools
     is_equal $EXIT_CODE 0 || die
 
-    show_addresses
-    show_routes
-    show_ports
-
+    # show_addresses
+    show_routes -4 8.8.8.8
+    # show_ports
+    # remove_test_route
     exit
     remove_test_route || die
     say "initialization complete, system ready"
