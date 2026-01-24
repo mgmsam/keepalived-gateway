@@ -212,6 +212,7 @@ setup_core_env ()
     BLANK="$SPACE$TAB"
     POSIX_IFS="$SPACE$TAB$LF"
     IFS="$POSIX_IFS"
+    is_file /proc/sys/kernel/ostype && OSTYPE="linux-gnu" || OSTYPE=""
 }
 
 include_config ()
@@ -1263,15 +1264,30 @@ resolve_dependencies ()
 
         if type route >/dev/null 2>&1
         then
+            is_equal $OSTYPE "linux-gnu" &&
+            control_route ()
+            {
+                case $1 in
+                    replace)
+                        shift
+                        route del $1 >/dev/null 2>&1
+                        route add $1 ${2:+gw $2} ${3:+dev $3} ${4:+metric $4}
+                    ;;
+                    *)
+                        route $1 $2 ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
+                    ;;
+                esac
+            } ||
             control_route ()
             {
                 case "$1" in
                     replace)
-                        route del $2 >/dev/null 2>&1
-                        route add $2
+                        shift
+                        route del "$1" >/dev/null 2>&1
+                        route add "$1" ${2:-}
                     ;;
                     *)
-                        route "$1" $2
+                        route "$1" "$2" ${3:-}
                     ;;
                 esac
             }
