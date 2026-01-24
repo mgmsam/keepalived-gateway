@@ -1131,7 +1131,10 @@ resolve_dependencies ()
             *)
                 false
         esac ||
-        if type ss >/dev/null 2>&1
+        if type netstat >/dev/null 2>&1
+        then
+            :
+        elif type ss >/dev/null 2>&1
         then
             show_ports ()
             {
@@ -1150,9 +1153,6 @@ resolve_dependencies ()
                     '"$AWK_NATURAL_SORT_END"'
                 '
             }
-        elif type netstat >/dev/null 2>&1
-        then
-            :
         elif
             PROC_NET_TCP=""
             for i in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6
