@@ -108,10 +108,11 @@ fi
 
 say ()
 {
-    EXIT_CODE=$?
+    RESULT=$?
     CONTINUE=""
-    NO_PREFIX=""
+    NO_PREFIX="no"
     USE_ESC="yes"
+
     while is_diff $# 0
     do
         case "${1:-}" in
@@ -128,14 +129,19 @@ say ()
                 break
             ;;
             *)
-                EXIT_CODE=$1
+                RESULT="$1"
             ;;
         esac
         shift
     done
+
+    is_equal "$RESULT" 0 &&
+        EXIT_CODE="${EXIT_CODE:-0}" ||
+        EXIT_CODE="$RESULT"
+
     is_empty "$*" || {
-        case "${NO_PREFIX:-}" in
-            "")
+        case "$NO_PREFIX" in
+            "no")
                 puts "${LOG_PREFIX:-$0: }${1:+$*}"
             ;;
             *)
@@ -152,14 +158,14 @@ die ()
     exit "$EXIT_CODE"
 }
 
-eval 'ERROR=$(:)' 2>/dev/null ||
+eval ': $(:)' 2>/dev/null ||
     die "error: POSIX command substitution \$(...) is not supported by this shell."
 
-eval 'ERROR=$((0))' 2>/dev/null ||
+eval ': $((0))' 2>/dev/null ||
     die "error: POSIX arithmetic expansion \$((...)) is not supported by this shell."
 
-eval 'ERROR=${ERROR#*:}' 2>/dev/null ||
-    die "error: POSIX parameter expansion \${VAR#*}, \${VAR%*}, ... is not supported by this shell."
+eval ': ${ERROR#*:}' 2>/dev/null ||
+    die "error: POSIX parameter expansion \${VAR#*}, \${VAR%*}, is not supported by this shell."
 
 is_digit ()
 {
@@ -185,10 +191,9 @@ is_term ()
     return "$IS_TERM"
 }
 
-check_root_access ()
+is_root_access ()
 {
-    test -w / ||
-        say "error: must be run as root to manage routes and interfaces."
+    test -w /dev/console
 }
 
 set_state ()
@@ -215,20 +220,27 @@ setup_core_env ()
     is_file /proc/sys/kernel/ostype && OSTYPE="linux-gnu" || OSTYPE=""
 }
 
+setup_defaults ()
+{
+    DEFAULT_ROLE="single"
+    DO_PING="no"
+    DO_SPEEDTEST="no"
+    PING_NEEDED="no"
+}
+
 include_config ()
 {
+    CONFIG_INCLUDED="no"
     CONFIG_FILE="/etc/keepalived-gateway.conf"
     if is_file "$CONFIG_FILE"
     then
-        ERROR="$(. "$CONFIG_FILE" 2>&1)" && . "$CONFIG_FILE" || {
-            EXIT_CODE=$?
-            say "${ERROR#*:}"
-        }
+        OUTPUT="$(. "$CONFIG_FILE" 2>&1)" &&
+            . "$CONFIG_FILE" &&
+                CONFIG_INCLUDED="yes" ||
+                    say "${OUTPUT#*:}"
     else
-        EXIT_CODE=$?
-        say "error: no such config file: '$CONFIG_FILE'"
+        say 2 "error: no such config file: '$CONFIG_FILE'"
     fi
-    return $EXIT_CODE
 }
 
 is_interface ()
@@ -523,13 +535,15 @@ format_duration ()
     M=$((S / 60))
     S=$((S % 60))
 
-    RESULT=""
-    test "$D" -gt 0 && RESULT="${D}d" || :
-    test "$H" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${H}h" || :
-    test "$M" -gt 0 && RESULT="${RESULT:+"$RESULT, "}${M}m" || :
-    test "$S" -gt 0 || is_empty "${RESULT:-}" && RESULT="${RESULT:+"$RESULT, "}${S}s"
+    TIMESTRING=""
+    test "$D" -gt 0 && TIMESTRING="${D}d" || :
+    test "$H" -gt 0 && TIMESTRING="${TIMESTRING:+"$TIMESTRING, "}${H}h" || :
+    test "$M" -gt 0 && TIMESTRING="${TIMESTRING:+"$TIMESTRING, "}${M}m" || :
+    test "$S" -gt 0 ||
+        is_empty "${TIMESTRING:-}" &&
+            TIMESTRING="${TIMESTRING:+"$TIMESTRING, "}${S}s"
 
-    puts "$RESULT"
+    puts "$TIMESTRING"
 }
 
 is_port ()
@@ -741,7 +755,12 @@ parse_resource ()
 
 verify_config_syntax ()
 {
-    case "${ROLE:=single}" in
+    is_equal "$CONFIG_INCLUDED" "yes" || {
+        ROLE="unknown"
+        return 0
+    }
+
+    case "${ROLE:=$DEFAULT_ROLE}" in
         cluster | master | master-advisor | single)
             DO_PING="yes"
             DO_SPEEDTEST="yes"
@@ -751,7 +770,8 @@ verify_config_syntax ()
             DO_SPEEDTEST="no"
         ;;
         *)
-            ROLE="unknown"
+            DO_PING="no"
+            DO_SPEEDTEST="no"
             say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
         ;;
     esac
@@ -1365,9 +1385,7 @@ resolve_dependencies ()
 
     type sleep >/dev/null 2>&1 && SLEEP="sleep" || {
         SLEEP="return"
-        SAVED_EXIT_CODE="$EXIT_CODE"
-        say "error: environment: continuous monitoring impossible: 'sleep' not found"
-        EXIT_CODE="$SAVED_EXIT_CODE"
+        say "WARNING: environment: continuous monitoring impossible: 'sleep' not found"
     }
 
     type timeout >/dev/null 2>&1 && {
@@ -1376,18 +1394,16 @@ resolve_dependencies ()
             TIMEOUT="timeout"
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    PING_NEEDED="no"
-    is_equal "$ROUTE" "slave" || is_equal "$ROUTE" "unknown" || {
+    is_equal "$ROLE" "slave" || is_equal "$ROLE" "unknown" || {
         is_equal "$DO_PING" "no" &&
         is_equal "$DO_SPEEDTEST" "yes" &&
         is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
-            PING_NEEDED="yes"
-            type ping >/dev/null 2>&1 ||
+            type ping >/dev/null 2>&1 && PING_NEEDED="yes" ||
                 say 127 "error: environment: gateway check impossible: 'ping' not found"
         }
     }
 
-    is_equal $EXIT_CODE 0
+    return "$EXIT_CODE"
 }
 
 resolve_ping ()
@@ -1595,7 +1611,8 @@ verify_network_state ()
 
     is_equal "$PING_NEEDED" "no" || resolve_ping || {
         say "error: environment: 'ping' is unusable: network stack support check failed"
-        return $EXIT_CODE
+        DO_PING="no"
+        DO_SPEEDTEST="no"
     }
 
     is_equal "$DO_PING" "no" || is_empty "${PING_FQDN:-}" || {
@@ -1665,25 +1682,20 @@ verify_network_state ()
     esac || say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
     LOCAL_IP=""
-    is_equal $EXIT_CODE 0
+    return "$EXIT_CODE"
 }
 
 resolve_server ()
 {
-    RETURN=0
     ERROR="sync server determination impossible"
 
-    is_equal "$SLEEP" "sleep" || {
-        RETURN=1
+    is_equal "$SLEEP" "sleep" ||
         say 127 "error: environment: $ERROR: 'sleep' not found"
-    }
 
-    is_port_free "$VIP_PORT" || {
-        RETURN=1
+    is_port_free "$VIP_PORT" ||
         say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIP_PORT is already in use"
-    }
 
-    is_equal "$RETURN" 0 || return 0
+    is_equal "$EXIT_CODE" 0 || return 0
 
     check_daemon ()
     {
@@ -1721,11 +1733,9 @@ resolve_server ()
     check_gateways_state_file ()
     {
         is_dir "${GATEWAYS_STATE_FILE%/*}" ||
-            ERROR="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" &&
-            ERROR="$(2>&1 > "$GATEWAYS_STATE_FILE")" || {
-                say "error: $ERROR"
-                return $EXIT_CODE
-            }
+            OUTPUT="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" &&
+            OUTPUT="$(2>&1 > "$GATEWAYS_STATE_FILE")" ||
+                say "error: $OUTPUT"
     }
 
     case "${VIP_FAMILY:-}" in
@@ -1786,59 +1796,59 @@ resolve_server ()
 
 detect_curl_client ()
 {
-    STATE="$(2>&1 curl $1://$2:1 || :)"
-    case "${STATE:-}" in
+    OUTPUT="$(2>&1 curl $1://$2:1 || :)"
+    case "${OUTPUT:-}" in
         *connect*)
             return 0
         ;;
         *Protocol*)
-            say -p " [unsupported scheme ‘$1’]"
+            STATUS=" [unsupported scheme ‘$1’]"
             return 1
         ;;
         *URL* | *resolve*)
-            say -p " [$3 unsupported]"
+            STATUS=" [$3 unsupported]"02
             return 2
         ;;
         *)
-            say -p " [undefined error]"
+            STATUS=" [undefined error]"
             return 3
     esac
 }
 
 detect_wget_client ()
 {
-    STATE="$(2>&1 wget $1://$2:1 || :)"
-    case "${STATE:-}" in
+    OUTPUT="$(2>&1 wget $1://$2:1 || :)"
+    case "${OUTPUT:-}" in
         *Connection*)
             return 0
         ;;
         *family* | *socket*)
-            say -p " [$3 unsupported]"
+            STATUS=" [$3 unsupported]"
             return 1
         ;;
         *support* | *http* | *ftp*)
-            say -p " [unsupported scheme ‘$1’]"
+            STATUS=" [unsupported scheme ‘$1’]"
             return 2
         ;;
         *)
-            say -p " [undefined error]"
+            STATUS=" [undefined error]"
             return 3
     esac
 }
 
 detect_netcat_client ()
 {
-    STATE="$(2>&1 nc $2 1 || :)"
-    case "${STATE:-}" in
+    OUTPUT="$(2>&1 nc $2 1 || :)"
+    case "${OUTPUT:-}" in
         "" | *Connection*)
             return 0
         ;;
         *family* | *resolve*)
-            say -p " [$3 unsupported]"
+            STATUS=" [$3 unsupported]"
             return 1
         ;;
         *)
-            say -p " [undefined error]"
+            STATUS=" [undefined error]"
             return 3
     esac
 }
@@ -1857,20 +1867,20 @@ probe_speedtest_fetcher ()
 {
     is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
         is_empty "${SPEEDTEST_IPV4:-}" || {
-            say -n "$PREFIX: probing IPv4 speedtest client capability..."
+            say 0 -n "$PREFIX: probing IPv4 speedtest client capability..."
             $1 "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 && {
                 FETCH_SPEEDTEST_IPV4="$2 ${SPEEDTEST_TARGET:-}"
                 say -p " [ OK ]"
-            } || RETURN=1
+            } || say -p "$STATUS"
         }
     }
     is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
         is_empty "${SPEEDTEST_IPV6:-}" || {
-            say -n "$PREFIX: probing IPv6 speedtest client capability..."
+            say 0 -n "$PREFIX: probing IPv6 speedtest client capability..."
             $1 "$SPEEDTEST_SCHEME" [::1] IPv6 && {
                 FETCH_SPEEDTEST_IPV6="$2 ${SPEEDTEST_TARGET:-}"
                 say -p " [ OK ]"
-            } || RETURN=1
+            } || say -p "$STATUS"
         }
     }
 }
@@ -1894,7 +1904,7 @@ probe_gateway_fetcher ()
                 fi && {
                     FETCH_GATEWAYS="$2 $VIP_TARGET"
                     say -p " [ OK ]"
-                } || RETURN=1
+                } || say -p "$STATUS"
             }
         ;;
     esac
@@ -1902,19 +1912,19 @@ probe_gateway_fetcher ()
 
 probe_client_capabilities ()
 {
-    RETURN=0
     PREFIX="environment: role '$ROLE': found '$COMMAND'"
+
     is_equal "$DO_SPEEDTEST" "no" ||
     is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
-        if is_supported_scheme "$3"
-        then
-            probe_speedtest_fetcher $1 $2
-        else
-            say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
-        fi
+    if is_supported_scheme "$3"
+    then
+        probe_speedtest_fetcher $1 $2
+    else
+        say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
+    fi
 
     probe_gateway_fetcher $1 $2
-    return $RETURN
+    return "$EXIT_CODE"
 }
 
 resolve_client ()
@@ -1944,12 +1954,14 @@ resolve_client ()
                     VIP_TARGET="${VIP_NETCAT_ARGS:-}"
                     probe_client_capabilities detect_netcat_client fetch_netcat http
                 ;;
-            esac && break || continue
+            esac && {
+                EXIT_CODE="0"
+                return
+            } || continue
         else
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         fi
     done
-    is_equal $RETURN 0
 }
 
 resolve_transfer_tools ()
@@ -1969,7 +1981,11 @@ resolve_transfer_tools ()
         slave)
             resolve_client
         ;;
+        *)
+            EXIT_CODE="1"
+        ;;
     esac
+    return "$EXIT_CODE"
 }
 
 echo_conf_vars ()
@@ -2058,7 +2074,7 @@ remove_routes ()
     while read ROUTE
     do
         say -n "removing route '$ROUTE' ..."
-        control_route ${1:-} del $ROUTE >/dev/null &&
+        control_route ${1:-} del $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
     done <<EOF
@@ -2096,12 +2112,12 @@ remove_test_route ()
 
 clean_and_exit ()
 {
-    EXIT="${1:-$?}"
+    EXIT_CODE="${1:-$?}"
     echo
     trap - 0
-    remove_test_route || RETURN=$?
-    is_empty "${GATEWAY_SERVER_PID:-}" || kill $GATEWAY_SERVER_PID 2>/dev/null
-    is_equal "${EXIT:-}" 0 && exit "$RETURN" || exit "$EXIT"
+    remove_test_route || :
+    is_empty "${GATEWAY_SERVER_PID:-}" || kill "$GATEWAY_SERVER_PID" 2>/dev/null
+    exit "$EXIT_CODE"
 }
 
 format_route ()
@@ -2499,8 +2515,8 @@ sync_gateways ()
 update_gateways_state ()
 {
     is_dir "${GATEWAYS_STATE_FILE%/*}" ||
-    ERROR="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" || {
-        say "error: $ERROR"
+    OUTPUT="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" || {
+        say "error: $OUTPUT"
         return 1
     } >&2
     echo "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
@@ -2669,19 +2685,23 @@ fetch_gateways ()
 
 main ()
 {
-    EXIT_CODE=0
-    check_root_access || die
+    is_root_access ||
+        die "error: root privileges are required to manage routing tables."
+
     say "switching to init mode"
     set_state "init"
     setup_core_env
+    setup_defaults
+
     say "loading configuration..."
-    include_config && verify_config_syntax
+    include_config
+    verify_config_syntax
     resolve_dependencies &&
-    verify_network_state || die
-    resolve_transfer_tools
-    is_equal $EXIT_CODE 0 || die
-    remove_test_route || die
+    verify_network_state &&
+    resolve_transfer_tools || exit
+    remove_test_route || exit
     say "initialization complete, system ready"
+
     trap 'clean_and_exit' 0      # EXIT (0) : Naturally occurring script termination.
     trap 'clean_and_exit 129' 1  # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
     trap 'clean_and_exit 130' 2  # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
