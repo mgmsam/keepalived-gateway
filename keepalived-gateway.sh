@@ -198,6 +198,7 @@ is_root_access ()
 
 set_state ()
 {
+    say "switching to $1 mode"
     STATE="$1"
     LOG_PREFIX="kg [$1]: "
 }
@@ -2688,7 +2689,6 @@ main ()
     is_root_access ||
         die "error: root privileges are required to manage routing tables."
 
-    say "switching to init mode"
     set_state "init"
     setup_core_env
     setup_defaults
@@ -2716,7 +2716,6 @@ main ()
     if is_empty "${VIP:-}"
     then
         echo
-        say "switching to single mode"
         set_state "single"
         while :
         do
@@ -2735,7 +2734,6 @@ main ()
                     *)
                         echo
                         say "virtual IP detected on this host: '$VIP'"
-                        say "switching to $ROLE mode"
                         set_state "$ROLE"
                     ;;
                 esac
@@ -2754,11 +2752,10 @@ main ()
                         is_equal "$STATE" "slave" || {
                             echo
                             say "virtual IP not found on this host: '$VIP'"
-                            say "switching to slave mode"
                             set_state "slave"
                         }
                         fetch_gateways && sync_gateways || {
-                            say "master unreachable, switching to slave-single mode"
+                            say "master unreachable"
                             set_state "slave-single"
                             false
                         }
@@ -2766,7 +2763,7 @@ main ()
                     "slave-single")
                         fetch_gateways && {
                             echo
-                            say "master reachable, switching back to slave mode"
+                            say "master reachable"
                             set_state "slave"
                             sync_gateways
                         }
