@@ -1042,7 +1042,14 @@ resolve_dependencies ()
 
         control_route ()
         {
-            ip_family "${1:-}" route "$1" $2
+            case "${1:-}" in
+                -[46])
+                    ip_family "$1" route "$2" $3
+                ;;
+                add | del | replace)
+                    ip_family route "$1" $2
+                ;;
+            esac
         }
 
         show_addresses ()
@@ -2046,11 +2053,14 @@ run_ip ()
     $EXEC && echo "$EXEC" >&2
 }
 
-remove_route ()
+remove_routes ()
 {
     while read ROUTE
     do
-        run_ip route del "$ROUTE" || RETURN=$?
+        say -n "removing route '$ROUTE' ..."
+        control_route ${1:-} del $ROUTE >/dev/null &&
+            say -p " [ OK ]" ||
+            say -p " [ FAILED ]"
     done <<EOF
 $REMOVE_ROUTES
 EOF
@@ -2058,33 +2068,30 @@ EOF
 
 remove_test_route ()
 {
-    IP_CMD="ip -4" REMOVE_ROUTES=""
+    REMOVE_ROUTES=""
     for IP in ${PING_IPV4:-} ${SPEEDTEST_IPV4:-}
     do
-        ROUTE="$(run_ip route show "$IP" 2>/dev/null)"
+        ROUTE="$(show_routes -4 "$IP")"
         is_empty "${ROUTE:-}" ||
             REMOVE_ROUTES="${REMOVE_ROUTES:+"$REMOVE_ROUTES$LF"}$ROUTE"
     done
     is_empty "${REMOVE_ROUTES:-}" || {
-        say "removing test IPv4 routes from the system..."
-        remove_route
+        remove_routes -4
         REMOVE_ROUTES=""
     }
 
-    IP_CMD="ip -6"
     for IP in ${PING_IPV6:-} ${SPEEDTEST_IPV6:-}
     do
-        ROUTE="$(run_ip route show "$IP" 2>/dev/null)"
+        ROUTE="$(show_routes -6 "$IP")"
         is_empty "${ROUTE:-}" ||
             REMOVE_ROUTES="${REMOVE_ROUTES:+"$REMOVE_ROUTES$LF"}$ROUTE"
     done
     is_empty "${REMOVE_ROUTES:-}" || {
-        say "removing test IPv6 routes from the system..."
-        remove_route
+        remove_routes -6
         REMOVE_ROUTES=""
     }
 
-    return "${RETURN:-0}"
+    return "$EXIT_CODE"
 }
 
 clean_and_exit ()
@@ -2669,31 +2676,18 @@ main ()
     setup_core_env
     say "loading configuration..."
     include_config && verify_config_syntax
-    echo_conf_vars verify_config_syntax
-    resolve_dependencies || {
-        echo_conf_vars resolve_dependencies
-        die
-    }
-    verify_network_state || {
-        echo_conf_vars verify_network_state
-        die
-    }
+    resolve_dependencies &&
+    verify_network_state || die
     resolve_transfer_tools
-    echo_conf_vars resolve_transfer_tools
     is_equal $EXIT_CODE 0 || die
-
-    # show_addresses
-    show_routes -4 8.8.8.8
-    # show_ports
-    # remove_test_route
-    exit
     remove_test_route || die
     say "initialization complete, system ready"
     trap 'clean_and_exit' 0      # EXIT (0) : Naturally occurring script termination.
     trap 'clean_and_exit 129' 1  # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
     trap 'clean_and_exit 130' 2  # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
     trap 'clean_and_exit 143' 15 # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
-
+    echo_conf_vars resolve_transfer_tools
+    exit
     ALIVE_GATEWAYS=""
     ALIVE_METRICS=""
     ALIVE_ROUTES=""
