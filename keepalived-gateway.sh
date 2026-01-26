@@ -1032,7 +1032,6 @@ resolve_dependencies ()
             fi
         done >/dev/null 2>&1
         IP4="${IP4:-ip}"
-        IP6="${IP6:-ip}"
 
         ip_family ()
         {
@@ -1043,15 +1042,15 @@ resolve_dependencies ()
                     $IP4 "$@"
                 ;;
                 -6)
-                    $IP6 "$@"
+                    ${IP6:-$IP4} "$@"
                 ;;
                 -64)
-                    $IP6 "$@"
+                    is_empty "${IP6:-}" || $IP6 "$@"
                     $IP4 "$@"
                 ;;
                 *)
                     $IP4 "$@"
-                    $IP6 "$@"
+                    is_empty "${IP6:-}" || $IP6 "$@"
                 ;;
             esac
         }
@@ -1068,7 +1067,7 @@ resolve_dependencies ()
                     ip_family "$1" route "$2" $3
                 ;;
                 add | del | replace)
-                    ip_family route "$1" $2
+                    ip_family "" route "$1" $2
                 ;;
             esac
         }
