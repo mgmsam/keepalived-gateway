@@ -2483,7 +2483,7 @@ reconcile_gateways ()
         sleep 1
     done
 
-    is_equal "$STATE" "master-advisor" || refresh_routing_table
+    is_equal "$ROLE" "master-advisor" || refresh_routing_table
 }
 
 sync_gateways ()
@@ -2568,6 +2568,11 @@ serve_telnetd ()
 
 serve_gateways ()
 {
+    is_vrrp_master || {
+        say "virtual IP not found on this host: '$VIP'"
+        return 1
+    }
+
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
         is_port_free "$VIP_PORT" || {
             say "error: cannot start sync server, port $VIP_PORT is busy"
@@ -2684,6 +2689,117 @@ fetch_gateways ()
     say "received remote state from master (${VIP%/*}): [$FETCHED_GATEWAYS]"
 }
 
+
+run_single_mode ()
+{
+    echo
+    set_state "$ROLE"
+    while :
+    do
+        check_gateways || reconcile_gateways
+        say "next check cycle in: '$HUMAN_INTERVAL'"
+        sleep "$CHECK_INTERVAL"
+    done
+}
+
+run_master_mode ()
+{
+    echo
+    set_state "$ROLE"
+    while :
+    do
+        check_gateways || {
+            reconcile_gateways
+            update_gateways_state
+        } && serve_gateways || stop_serve_gateways
+        say "next check cycle in: '$HUMAN_INTERVAL'"
+        sleep "$CHECK_INTERVAL"
+    done
+}
+
+run_slave_mode ()
+{
+    echo
+    set_state "$ROLE"
+    while :
+    do
+        case "$STATE" in
+            "$ROLE")
+                fetch_gateways && sync_gateways || {
+                    say "master unreachable"
+                    set_state "slave-single"
+                    false
+                }
+            ;;
+            "$ROLE-single")
+                fetch_gateways && {
+                    echo
+                    say "master reachable"
+                    set_state "slave"
+                    sync_gateways
+                }
+            ;;
+        esac || {
+            check_gateways || reconcile_gateways || {
+                sleep 1
+                continue
+            }
+        }
+        say "next check cycle in: '$HUMAN_INTERVAL'"
+        sleep "$CHECK_INTERVAL"
+    done
+}
+
+run_cluster_mode ()
+{
+    while :
+    do
+        if is_vrrp_master
+        then
+            is_equal "$STATE" "$ROLE-master" || {
+                echo
+                say "virtual IP detected on this host: '$VIP'"
+                set_state "$ROLE-master"
+            }
+            check_gateways || {
+                reconcile_gateways
+                update_gateways_state
+            } && serve_gateways || stop_serve_gateways
+        else
+            case "$STATE" in
+                "$ROLE-slave" | "$ROLE-master" | init)
+                    is_equal "$STATE" "$ROLE-slave" || {
+                        is_diff "$STATE" "$ROLE-master" || stop_serve_gateways
+                        echo
+                        say "virtual IP not found on this host: '$VIP'"
+                        set_state "$ROLE-slave"
+                    }
+                    fetch_gateways && sync_gateways || {
+                        say "master unreachable"
+                        set_state "$ROLE-slave-single"
+                        false
+                    }
+                ;;
+                "$ROLE-slave-single")
+                    fetch_gateways && {
+                        echo
+                        say "master reachable"
+                        set_state "$ROLE-slave"
+                        sync_gateways
+                    }
+                ;;
+            esac || {
+                check_gateways || reconcile_gateways || {
+                    sleep 1
+                    continue
+                }
+            }
+        fi
+        say "next check cycle in: '$HUMAN_INTERVAL'"
+        sleep "$CHECK_INTERVAL"
+    done
+}
+
 main ()
 {
     is_root_access ||
@@ -2713,72 +2829,20 @@ main ()
     ALIVE_ROUTES=""
     GATEWAY_SERVER_PID=""
 
-    if is_empty "${VIP:-}"
-    then
-        echo
-        set_state "single"
-        while :
-        do
-            check_gateways || reconcile_gateways
-            say "next check cycle in: '$HUMAN_INTERVAL'"
-            sleep "$CHECK_INTERVAL"
-        done
-    else
-        while :
-        do
-            if is_vrrp_master
-            then
-                case "$STATE" in
-                    "master" | "master-advisor")
-                    ;;
-                    *)
-                        echo
-                        say "virtual IP detected on this host: '$VIP'"
-                        set_state "$ROLE"
-                    ;;
-                esac
-                check_gateways || {
-                    reconcile_gateways
-                    update_gateways_state
-                } && serve_gateways || stop_serve_gateways
-            else
-                case "$STATE" in
-                    "slave" | "master" | "master-advisor" | "init")
-                        case "$STATE" in
-                            "master" | "master-advisor")
-                                stop_serve_gateways
-                            ;;
-                        esac
-                        is_equal "$STATE" "slave" || {
-                            echo
-                            say "virtual IP not found on this host: '$VIP'"
-                            set_state "slave"
-                        }
-                        fetch_gateways && sync_gateways || {
-                            say "master unreachable"
-                            set_state "slave-single"
-                            false
-                        }
-                    ;;
-                    "slave-single")
-                        fetch_gateways && {
-                            echo
-                            say "master reachable"
-                            set_state "slave"
-                            sync_gateways
-                        }
-                    ;;
-                esac || {
-                    check_gateways || reconcile_gateways || {
-                        sleep 1
-                        continue
-                    }
-                }
-            fi
-            say "next check cycle in: '$HUMAN_INTERVAL'"
-            sleep "$CHECK_INTERVAL"
-        done
-    fi
+    case "$ROLE" in
+        single)
+            run_single_mode
+        ;;
+        master | master-advisor)
+            run_master_mode
+        ;;
+        slave)
+            run_slave_mode
+        ;;
+        cluster)
+            run_cluster_mode
+        ;;
+    esac
 }
 
 main
