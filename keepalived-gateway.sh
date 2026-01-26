@@ -2170,18 +2170,16 @@ EOF
 
     case "$GATEWAY_IP" in
         *:*)
-            IP_CMD="ip -6"
-            SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
-            PING_IP="${PING_IPV6:-}"
+            FAMILY="-6"
             PING="${PING6:-}"
-            DOWNLOAD_INET="-6"
+            PING_IP="${PING_IPV6:-}"
+            SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
         ;;
         *)
-            IP_CMD="ip -4"
-            SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
-            PING_IP="${PING_IPV4:-}"
+            FAMILY="-4"
             PING="${PING4:-}"
-            DOWNLOAD_INET="-4"
+            PING_IP="${PING_IPV4:-}"
+            SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
         ;;
     esac
 
@@ -2190,11 +2188,34 @@ EOF
     PING_ROUTE="${PING_IP:-} via $GATEWAY_IP dev $INTERFACE"
 }
 
+is_empty_alive_metrics ()
+{
+    case "$FAMILY" in
+        -4)
+            is_empty "${ALIVE_METRICS_IPV4:-}" || return
+        ;;
+        -6)
+            is_empty "${ALIVE_METRICS_IPV6:-}" || return
+        ;;
+    esac
+}
+
 is_metric_alive ()
 {
-    case " $ALIVE_METRICS " in
-        *" ${METRIC:-0} "*)
-            return 0
+    case "$FAMILY" in
+        -4)
+            case " $ALIVE_METRICS_IPV4 " in
+                *" ${METRIC:-0} "*)
+                    return 0
+                ;;
+            esac
+        ;;
+        -6)
+            case " $ALIVE_METRICS_IPV6 " in
+                *" ${METRIC:-0} "*)
+                    return 0
+                ;;
+            esac
         ;;
     esac
     return 1
@@ -2207,13 +2228,27 @@ is_failed_metric ()
 
 collect_gateway ()
 {
-    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS:+"$DEFAULT_GATEWAYS "}$BEST_GATEWAY"
+    case "$FAMILY" in
+        -4)
+            DEFAULT_GATEWAYS_IPV4="${DEFAULT_GATEWAYS_IPV4:+"$DEFAULT_GATEWAYS_IPV4 "}$BEST_GATEWAY"
+        ;;
+        -6)
+            DEFAULT_GATEWAYS_IPV6="${DEFAULT_GATEWAYS_IPV6:+"$DEFAULT_GATEWAYS_IPV6 "}$BEST_GATEWAY"
+        ;;
+    esac
     BEST_GATEWAY=""
 }
 
 collect_route ()
 {
-    DEFAULT_ROUTES="${DEFAULT_ROUTES:+"$DEFAULT_ROUTES$LF"}$BEST_ROUTE"
+    case "$FAMILY" in
+        -4)
+            DEFAULT_ROUTES_IPV4="${DEFAULT_ROUTES_IPV4:+"$DEFAULT_ROUTES_IPV4$LF"}$BEST_ROUTE"
+        ;;
+        -6)
+            DEFAULT_ROUTES_IPV6="${DEFAULT_ROUTES_IPV6:+"$DEFAULT_ROUTES_IPV6$LF"}$BEST_ROUTE"
+        ;;
+    esac
     BEST_ROUTE=""
 }
 
@@ -2459,6 +2494,7 @@ reconcile_gateways ()
 {
     DEFAULT_GATEWAYS="${ALIVE_GATEWAYS:-}"
     DEFAULT_ROUTES="${ALIVE_ROUTES:-}"
+    CURRENT_FAMILY=""
     CURRENT_METRIC=""
     BEST_GATEWAY=""
     BEST_ROUTE=""
@@ -2466,23 +2502,24 @@ reconcile_gateways ()
 
     while :
     do
-
-        for GATEWAY in $GATEWAYS
+        for GATEWAY in ${GATEWAYS_IPV4:-} ${GATEWAYS_IPV6:-}
         do
             format_route
             echo
-            say "testing gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
+            say "testing IPv${FAMILY#-} gateway '$GATEWAY_IP' dev '$INTERFACE'${METRIC:+ with metric $METRIC}"
 
+            is_equal "${CURRENT_FAMILY:-}" "$FAMILY" &&
             is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
                 is_empty "${BEST_ROUTE:-}" || {
                     collect_gateway
                     collect_route
                     BEST_SPEED=0
                 }
-                is_empty "${ALIVE_METRICS:-}" || is_failed_metric || {
+                is_empty_alive_metrics || is_failed_metric || {
                     say "skipping gateway: active route already found with metric '${METRIC:-0}'"
                     continue
                 }
+                CURRENT_FAMILY="$FAMILY"
                 CURRENT_METRIC="${METRIC:-0}"
             }
 
@@ -2509,15 +2546,10 @@ reconcile_gateways ()
             break
         }
 
-        is_empty "${DEFAULT_GATEWAYS:-}" || break
-
+        is_empty "${DEFAULT_GATEWAYS_IPV4:-}${DEFAULT_GATEWAYS_IPV6:-}" || break
         echo
         say "WARNING: no alive gateways found, retrying in 1s..."
-
-        # In 'slave' mode, if 'master's web is unreachable and 'slave-single' is active:
-        # Instead of waiting indefinitely for a live route,
-        # proceed to check master availability.
-        is_diff "$STATE" "slave-single" || return
+        is_diff "$STATE" "slave-survivor" || return
 
         sleep 1
     done
