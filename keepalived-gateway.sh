@@ -2593,6 +2593,7 @@ reconcile_gateways ()
         sleep 1
     done
 
+    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:-}$LF${DEFAULT_GATEWAYS_IPV6:-}"
     is_equal "$ROLE" "master-advisor" || refresh_routing_table
 }
 
@@ -2796,7 +2797,9 @@ fetch_gateways ()
         say "error: received empty or invalid gateway state from master (${VIP%/*})"
         return 1
     } >&2
-    say "received remote state from master (${VIP%/*}): [$FETCHED_GATEWAYS]"
+    FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS%$LF*}"
+    FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS#*$LF}"
+    say "received remote state from master (${VIP%/*}):\n  IPv4: [${FETCHED_GATEWAYS_IPV4:-}]\n  IPv6: [${FETCHED_GATEWAYS_IPV6:-}]"
 }
 
 
