@@ -762,7 +762,7 @@ verify_config_syntax ()
     }
 
     case "${ROLE:=$DEFAULT_ROLE}" in
-        cluster | master | master-advisor | single)
+        cluster | master | master-advisor | slave-survivor | single)
             DO_PING="yes"
             DO_SPEEDTEST="yes"
         ;;
@@ -1155,7 +1155,7 @@ resolve_dependencies ()
     if is_equal "${NET_TOOL:-}" "ip"
     then
         case "$ROLE" in
-            single | slave | unknown)
+            single | slave | slave-survivor | unknown)
             ;;
             *)
                 false
@@ -1889,7 +1889,7 @@ probe_speedtest_fetcher ()
 probe_gateway_fetcher ()
 {
     case "$ROLE" in
-        cluster | slave)
+        cluster | slave | slave-survivor)
             is_not_empty "${FETCH_GATEWAYS:-}" || {
                 if is_equal "$VIP_FAMILY" "inet"
                 then
@@ -1979,7 +1979,7 @@ resolve_transfer_tools ()
         single)
             is_equal "$DO_SPEEDTEST" "no" || resolve_client
         ;;
-        slave)
+        slave | slave-survivor)
             resolve_client
         ;;
         *)
@@ -2725,18 +2725,25 @@ run_slave_mode ()
     while :
     do
         case "$STATE" in
-            "$ROLE")
+            "slave")
                 fetch_gateways && sync_gateways || {
                     say "master unreachable"
-                    set_state "slave-single"
+                    sleep 1
+                    continue
+                }
+            ;;
+            "slave-survivor")
+                fetch_gateways && sync_gateways || {
+                    say "master unreachable"
+                    set_state "autonomous"
                     false
                 }
             ;;
-            "$ROLE-single")
+            "autonomous")
                 fetch_gateways && {
                     echo
                     say "master reachable"
-                    set_state "slave"
+                    set_state "slave-survivor"
                     sync_gateways
                 }
             ;;
@@ -2834,7 +2841,7 @@ main ()
         master | master-advisor)
             run_master_mode
         ;;
-        slave)
+        slave | slave-survivor)
             run_slave_mode
         ;;
         cluster)
