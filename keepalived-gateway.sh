@@ -1013,7 +1013,7 @@ resolve_dependencies ()
     then
         NET_TOOL="ip"
 
-        IP4=""
+        IP4="ip"
         IP6=""
         for i in -4 --inet "-f inet"
         do
@@ -1031,12 +1031,9 @@ resolve_dependencies ()
                 break
             fi
         done >/dev/null 2>&1
-        IP4="${IP4:-ip}"
 
         ip_family ()
         {
-            FAMILY="${1:-}"
-            shift
             case "${FAMILY:-}" in
                 -4)
                     $IP4 "$@"
@@ -1048,28 +1045,71 @@ resolve_dependencies ()
                     is_empty "${IP6:-}" || $IP6 "$@"
                     $IP4 "$@"
                 ;;
-                *)
+                -46 | "")
                     $IP4 "$@"
                     is_empty "${IP6:-}" || $IP6 "$@"
                 ;;
             esac
         }
 
-        show_routes ()
+        ip_wrapper ()
         {
-            ip_family "${1:-}" route show ${2:-}
+            case "${1:-}" in
+                *:*)
+                    case "${FAMILY:-}" in
+                        "" | *6*)
+                            FAMILY="-6"
+                        ;;
+                        -4)
+                            return
+                        ;;
+                    esac
+                ;;
+                *.*)
+                    case "${FAMILY:-}" in
+                        "" | *4*)
+                            FAMILY="-4"
+                        ;;
+                        -6)
+                            return
+                        ;;
+                    esac
+                ;;
+            esac
+            ip_family $ACTION "$@"
         }
 
         control_route ()
         {
+            ACTION=""
+            FAMILY=""
             case "${1:-}" in
-                -[46])
-                    ip_family "$1" route "$2" $3
-                ;;
-                add | del | replace)
-                    ip_family "" route "$1" $2
+                -[46] | -46 | -64)
+                    FAMILY="$1"
+                    shift
                 ;;
             esac
+            case "${1:-}" in
+                add | del | delete | replace | show)
+                    ACTION="route $1"
+                    shift
+                ;;
+                *)
+                    return
+                ;;
+            esac
+            ip_wrapper "$@"
+        }
+
+        show_routes ()
+        {
+            FAMILY=""
+            case "${1:-}" in
+                -[46] | -46 | -64)
+                    FAMILY="$1"
+                    shift
+            esac
+            control_route ${FAMILY:-} show "$@"
         }
 
         show_addresses ()
