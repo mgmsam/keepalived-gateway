@@ -2252,6 +2252,36 @@ collect_route ()
     BEST_ROUTE=""
 }
 
+collect_dead_route ()
+{
+    case "$FAMILY" in
+        -4)
+            DEAD_ROUTES_IPV4="${DEAD_ROUTES_IPV4:+"$DEAD_ROUTES_IPV4$LF"}$ROUTE"
+        ;;
+        -6)
+            DEAD_ROUTES_IPV6="${DEAD_ROUTES_IPV6:+"$DEAD_ROUTES_IPV6$LF"}$ROUTE"
+        ;;
+    esac
+}
+
+collect_alive_route ()
+{
+    case "$FAMILY" in
+        -4)
+            ALIVE_COUNT_IPV4="$((ALIVE_COUNT_IPV4 + 1))"
+            ALIVE_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:+"$ALIVE_GATEWAYS_IPV4 "}$GATEWAY"
+            ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+"$ALIVE_METRICS_IPV4 "}${METRIC:-0}"
+            ALIVE_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:+"$ALIVE_ROUTES_IPV4$LF"}$ROUTE"
+        ;;
+        -6)
+            ALIVE_COUNT_IPV6="$((ALIVE_COUNT_IPV6 + 1))"
+            ALIVE_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:+"$ALIVE_GATEWAYS_IPV6 "}$GATEWAY"
+            ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+"$ALIVE_METRICS_IPV6 "}${METRIC:-0}"
+            ALIVE_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:+"$ALIVE_ROUTES_IPV6$LF"}$ROUTE"
+        ;;
+    esac
+}
+
 is_vrrp_master ()
 {
     is_local_ip "$VIP" "$VIP_FAMILY" >/dev/null 2>&1
@@ -2428,58 +2458,67 @@ remove_obsolete_routes ()
 
 check_gateways ()
 {
-    is_not_empty "${DEFAULT_GATEWAYS:-}" || return
+    is_not_empty "${DEFAULT_GATEWAYS_IPV4:-}${DEFAULT_GATEWAYS_IPV6:-}" ||
+        return
 
-    ALIVE_COUNT=0
-    ALIVE_GATEWAYS=""
-    ALIVE_METRICS=""
-    ALIVE_ROUTES=""
-    DEAD_ROUTES=""
+    RESULT="0"
 
-    for GATEWAY in $DEFAULT_GATEWAYS
+    ALIVE_COUNT_IPV4="0"
+    ALIVE_GATEWAYS_IPV4=""
+    ALIVE_METRICS_IPV4=""
+    ALIVE_ROUTES_IPV4=""
+    DEAD_ROUTES_IPV4=""
+
+    ALIVE_COUNT_IPV6="0"
+    ALIVE_GATEWAYS_IPV6=""
+    ALIVE_METRICS_IPV6=""
+    ALIVE_ROUTES_IPV6=""
+    DEAD_ROUTES_IPV6=""
+
+    for GATEWAY in ${DEFAULT_GATEWAYS_IPV4:-} ${DEFAULT_GATEWAYS_IPV6:-}
     do
         format_route
         echo
-        say "checking active route: '$ROUTE'"
+        say "checking active IPv${FAMILY#-} route: '$ROUTE'"
 
         is_interface "$INTERFACE" || {
             say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
-            DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
+            collect_dead_route
             continue
         }
 
         if is_not_empty "${PING_HOST:-}"
         then
-            run_ip route replace "$PING_ROUTE"
+            control_route "$FAMILY" replace "$PING_ROUTE"
             check_ping -I "$INTERFACE" "$PING_IP" || {
-                run_ip route del "$PING_ROUTE"
+                control_route "$FAMILY" del "$PING_ROUTE"
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
-                DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
+                collect_dead_route
                 continue
             }
-            run_ip route del "$PING_ROUTE"
+            control_route "$FAMILY" del "$PING_ROUTE"
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
-                DEAD_ROUTES="${DEAD_ROUTES:+"$DEAD_ROUTES$LF"}$ROUTE"
+                collect_dead_route
                 continue
             }
         fi
-        say "alive active route: '$ROUTE'"
 
-        ALIVE_COUNT="$((ALIVE_COUNT + 1))"
-        ALIVE_GATEWAYS="${ALIVE_GATEWAYS:+"$ALIVE_GATEWAYS "}$GATEWAY"
-        ALIVE_METRICS="${ALIVE_METRICS:+"$ALIVE_METRICS "}${METRIC:-0}"
-        ALIVE_ROUTES="${ALIVE_ROUTES:+"$ALIVE_ROUTES$LF"}$ROUTE"
+        say "alive active route: '$ROUTE'"
+        collect_alive_route
     done
 
-    is_equal "$ALIVE_COUNT" "$TOTAL_METRICS" || {
-        is_empty "${DEAD_ROUTES:-}" || {
-            say "dead routes detected:"
-            echo "$DEAD_ROUTES"
-        }
-        return 1
+    is_equal "$ALIVE_COUNT_IPV4" "$TOTAL_METRICS_IPV4" || {
+        is_empty "${DEAD_ROUTES_IPV4:-}" ||
+            say "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
     }
+    is_equal "$ALIVE_COUNT_IPV6" "$TOTAL_METRICS_IPV6" || {
+        is_empty "${DEAD_ROUTES_IPV6:-}" ||
+            say "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
+    }
+
+    return "$RESULT"
 }
 
 refresh_routing_table ()
