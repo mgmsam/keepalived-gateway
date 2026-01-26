@@ -2704,6 +2704,7 @@ run_single_mode ()
 
 run_master_mode ()
 {
+    GATEWAY_SERVER_PID=""
     echo
     set_state "$ROLE"
     while :
@@ -2752,6 +2753,7 @@ run_slave_mode ()
 
 run_cluster_mode ()
 {
+    GATEWAY_SERVER_PID=""
     while :
     do
         if is_vrrp_master
@@ -2824,10 +2826,6 @@ main ()
     trap 'clean_and_exit 143' 15 # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
     echo_conf_vars resolve_transfer_tools
     exit
-    ALIVE_GATEWAYS=""
-    ALIVE_METRICS=""
-    ALIVE_ROUTES=""
-    GATEWAY_SERVER_PID=""
 
     case "$ROLE" in
         single)
