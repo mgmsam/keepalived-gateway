@@ -2638,6 +2638,7 @@ sync_gateways ()
         collect_route
     done
 
+    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:-}$LF${DEFAULT_GATEWAYS_IPV6:-}"
     refresh_routing_table
 }
 
