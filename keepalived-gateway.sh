@@ -1606,7 +1606,7 @@ EOF
 is_local_ip ()
 {
     is_not_empty "${1:-}" || return 1
-    for IP in ${LOCAL_IP:-$(show_addresses)}
+    for IP in ${LOCAL_IP:-$(show_addresses ${2:-})}
     do
         is_diff "$IP" "$1" || return 0
     done
