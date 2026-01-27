@@ -1276,13 +1276,13 @@ resolve_dependencies ()
     then
         if type netstat >/dev/null 2>&1
         then
-            NETSTAT4=""
+            NETSTAT4="netstat"
             NETSTAT6=""
             for i in -4 --inet "-f inet"
             do
                 if netstat $i -rn
                 then
-                    NETSTAT4="$i"
+                    NETSTAT4="netstat $i"
                     break
                 fi
             done >/dev/null 2>&1
@@ -1290,22 +1290,57 @@ resolve_dependencies ()
             do
                 if netstat $i -rn
                 then
-                    NETSTAT6="$i"
+                    NETSTAT6="netstat $i"
                     break
                 fi
             done >/dev/null 2>&1
-            show_routes ()
+
+            netstat_family ()
             {
-                case "${1:-}" in
-                    -[46] | -46 | -64)
-                        FAMILY="$1"
-                        DESTINATION="${2:-}"
+                case "${FAMILY:-}" in
+                    -4)
+                        $NETSTAT4 "$@"
                     ;;
-                    *)
-                        FAMILY=""
-                        DESTINATION="${1:-}"
+                    -6)
+                        ${NETSTAT6:-$NETSTAT4} "$@"
+                    ;;
+                    -64)
+                        is_empty ${NETSTAT6:-} "$@" || $NETSTAT6 "$@"
+                        $NETSTAT4 "$@"
+                    ;;
+                    -46 | "")
+                        $NETSTAT4 "$@"
+                        is_empty ${NETSTAT6:-} "$@" || $NETSTAT6 "$@"
                     ;;
                 esac
+            }
+
+            show_routes ()
+            {
+                FAMILY=""
+                DESTINATION=""
+                while is_diff $# 0
+                do
+                    case "${1:-}" in
+                        -[46] | -46 | -64)
+                            FAMILY="$1"
+                        ;;
+                        -d)
+                            DESTINATION="$2"
+                            shift
+                        ;;
+                        -i)
+                            INTERFACE="$2"
+                            shift
+                        ;;
+                        *)
+                            DESTINATION="$1"
+                            shift
+                            break
+                        ;;
+                    esac
+                    shift
+                done
                 case "${DESTINATION:-}" in
                     *:*)
                         case "${FAMILY:-}" in
@@ -1328,33 +1363,16 @@ resolve_dependencies ()
                         esac
                     ;;
                 esac
-                case "${NETSTAT4:+${NETSTAT6:-}}" in
-                    "")
-                        netstat ${NETSTAT4:-${NETSTAT6:-}} -rn
-                    ;;
-                    *)
-                        case "${FAMILY:-}" in
-                            -4)
-                                netstat $NETSTAT4 -rn
-                            ;;
-                            -6)
-                                netstat $NETSTAT6 -rn
-                            ;;
-                            -64)
-                                netstat $NETSTAT6 -rn
-                                netstat $NETSTAT4 -rn
-                            ;;
-                            -46 | "")
-                                netstat $NETSTAT4 -rn
-                                netstat $NETSTAT6 -rn
-                            ;;
-                        esac
-                    ;;
-                esac | awk '
+                netstat_family -rn | awk '
                     BEGIN {
+                        interface = "'"${INTERFACE:-}"'"
                         destination = "'"${DESTINATION:-}"'"
                     }
                     $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
+                        if (interface != "" && $NF != interface) {
+                            next
+                        }
+
                         if (destination != "") {
                             match_found = "no"
                             if (destination == $1) {
