@@ -6,6 +6,10 @@
 
 ## Исправить функции
 
+`control_route`
+
+- [ ] принять на обработку отрицательный код возврата.
+
 `resolve_dependencies`
 
 - [X] Поправить код `awk` в переменных `AWK_UNIQUE_COLLECT` и/или `AWK_NATURAL_SORT`, т.е. есть мусор:

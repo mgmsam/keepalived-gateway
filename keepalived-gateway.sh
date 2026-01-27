@@ -1403,27 +1403,29 @@ resolve_dependencies ()
             is_equal $OSTYPE "linux-gnu" &&
             control_route ()
             {
-                case $1 in
+                net_parser "$@"
+                shift "$SHIFT"
+                case "$COMMAND" in
                     replace)
-                        shift
-                        route del $1 >/dev/null 2>&1
-                        route add $1 ${2:+gw $2} ${3:+dev $3} ${4:+metric $4}
+                        route del "$DESTINATION" 2>/dev/null || :
+                        route add "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
                     ;;
                     *)
-                        route $1 $2 ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
+                        route "$COMMAND" "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
                     ;;
                 esac
             } ||
             control_route ()
             {
-                case "$1" in
+                net_parser "$@"
+                shift "$SHIFT"
+                case "$COMMAND" in
                     replace)
-                        shift
-                        route del "$1" >/dev/null 2>&1
-                        route add "$1" ${2:-}
+                        route del "$DESTINATION" 2>/dev/null || :
+                        route add "$DESTINATION" "$1"
                     ;;
                     *)
-                        route "$1" "$2" ${3:-}
+                        route "$COMMAND" "$DESTINATION" "$1" ${2:-}
                     ;;
                 esac
             }
@@ -2285,7 +2287,7 @@ check_ping ()
 evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
-    control_route "$FAMILY" replace $SPEEDTEST_ROUTE
+    control_route "$FAMILY" replace $SPEEDTEST_ROUTE >/dev/null 2>&1
     if speedtest "$SPEEDTEST_URL"
     then
         test "$BEST_SPEED" -ge "$BIT" || {
@@ -2436,14 +2438,14 @@ check_gateways ()
 
         if is_not_empty "${PING_HOST:-}"
         then
-            control_route "$FAMILY" replace $PING_ROUTE
+            control_route "$FAMILY" replace $PING_ROUTE >/dev/null 2>&1
             check_ping -I "$INTERFACE" "$PING_IP" || {
-                control_route "$FAMILY" del $PING_ROUTE
+                control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
                 collect_dead_route
                 continue
             }
-            control_route "$FAMILY" del $PING_ROUTE
+            control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
