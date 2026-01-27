@@ -2606,11 +2606,16 @@ sync_gateways ()
     }
     say "applying new gateway configuration from master (${VIP%/*})"
 
-    for GATEWAY in $FETCHED_GATEWAYS
+    DEFAULT_GATEWAYS_IPV4=""
+    DEFAULT_GATEWAYS_IPV6=""
+    DEFAULT_ROUTES_IPV4=""
+    DEFAULT_ROUTES_IPV6=""
+
+    for GATEWAY in ${FETCHED_GATEWAYS_IPV4:-} ${FETCHED_GATEWAYS_IPV6:-}
     do
         format_route
         echo
-        say "configuring gateway: '$GATEWAY_IP' on '$INTERFACE' with metric: '${METRIC:-0}'"
+        say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP' dev '$INTERFACE'${METRIC:+ with metric $METRIC}"
         is_interface "$INTERFACE" || {
             say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
             continue
