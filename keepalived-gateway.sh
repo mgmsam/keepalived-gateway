@@ -2113,7 +2113,7 @@ remove_routes ()
 {
     while read ROUTE
     do
-        say -n "removing route '$ROUTE' ..."
+        say -n "removing IPv${1#-} route '$ROUTE' ..."
         control_route ${1:-} del $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
@@ -2380,14 +2380,15 @@ evaluate_gateway ()
 
 add_route ()
 {
-    is_not_empty "${DEFAULT_ROUTES:-}" || return
     echo
-    say "applying optimized routes to the system..."
     while read ROUTE
     do
-        run_ip route replace "$ROUTE" || :
+        say -n "applying IPv${1#-} route '$ROUTE' ..."
+        control_route "$1" replace "$ROUTE" >/dev/null 2>&1 &&
+            say -p " [ OK ]" ||
+            say -p " [ FAILED ]"
     done <<EOF
-$DEFAULT_ROUTES
+$2
 EOF
 }
 
@@ -2396,21 +2397,7 @@ get_current_routes ()
     CURRENT_ROUTES=
     for INTERFACE in $IFACES
     do
-        if ROUTES="$(ip route show | awk '
-            $1 == "default" {
-                for (i = 1; i <= NF; i++) {
-                    if ($i == "dev" && $(i+1) == "'"$INTERFACE"'") {
-                        print $0
-                        found = "yes"
-                        break
-                    }
-                }
-            }
-            END {
-                if (found == "yes") exit 0
-                exit 1
-            }
-        ')"
+        if ROUTES="$(show_routes "$1" -i "$INTERFACE" "default")"
         then
             while read ROUTE
             do
@@ -2426,8 +2413,8 @@ EOF
 
 get_obsolete_routes ()
 {
-    REMOVE_ROUTES="$(printf "%s\n\n%s" "$DEFAULT_ROUTES" "$CURRENT_ROUTES" | awk '
-        BEGIN {
+    OBSOLETE_FILTER='
+    BEGIN {
             found_separator = "no"
         }
 
@@ -2444,16 +2431,22 @@ get_obsolete_routes ()
         found_separator == "yes" && !($0 in wanted) {
             print $0
         }
-    ')"
+    '
+
+    REMOVE_ROUTES="$(awk "$OBSOLETE_FILTER" <<EOF
+$DEFAULT_ROUTES
+
+$CURRENT_ROUTES
+EOF
+    )"
+
     is_not_empty "${REMOVE_ROUTES:-}" || return
 }
 
 remove_obsolete_routes ()
 {
     echo
-    say "removing obsolete routes from the system..."
-    remove_route
-    return "${RETURN:-0}"
+    remove_route "$1"
 }
 
 check_gateways ()
@@ -2523,10 +2516,21 @@ check_gateways ()
 
 refresh_routing_table ()
 {
-    add_route &&
-    get_current_routes &&
-    get_obsolete_routes &&
-    remove_obsolete_routes || :
+    EXIT_CODE="0"
+
+    is_empty "${DEFAULT_GATEWAYS_IPV4:-}" || {
+        add_route -4 "$DEFAULT_GATEWAYS_IPV4" &&
+        get_current_routes -4 &&
+        get_obsolete_routes -4 &&
+        remove_obsolete_routes -4 || :
+    }
+
+    is_empty "${DEFAULT_GATEWAYS_IPV6:-}" || {
+        add_route -6 "$DEFAULT_GATEWAYS_IPV6" &&
+        get_current_routes -6 &&
+        get_obsolete_routes -6 &&
+        remove_obsolete_routes -6 || :
+    }
 }
 
 reconcile_gateways ()

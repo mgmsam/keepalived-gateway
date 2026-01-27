@@ -45,7 +45,7 @@
 
 `get_obsolete_routes`
 
-- [ ] Заменить `printf` на `echo` или `<<EOF`
+- [X] Заменить `printf` на `echo` или `<<EOF`
 
 `count_metrics`
 
