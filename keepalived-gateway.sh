@@ -2050,81 +2050,6 @@ resolve_transfer_tools ()
     return "$EXIT_CODE"
 }
 
-echo_conf_vars ()
-{
-    echo "Function [${1:-}]"
-    echo " =========== Config
-               INTERFACE [$INTERFACE]
-       DEFAULT_INTERFACE [$DEFAULT_INTERFACE]
-                  METRIC [$METRIC]
-          DEFAULT_METRIC [$DEFAULT_METRIC]
-                GATEWAYS [$GATEWAYS]
-          CHECK_INTERVAL [$CHECK_INTERVAL]
-               PING_HOST [$PING_HOST]
-               SPEEDTEST [$SPEEDTEST]
-          SPEEDTEST_HOST [$SPEEDTEST_HOST]
-         SPEEDTEST_SCOPE [$SPEEDTEST_SCOPE]
-                    ROLE [$ROLE]
-                     VIP [$VIP]
-                VIP_PORT [$VIP_PORT]
-              VIP_FAMILY [$VIP_FAMILY]
- =========== VARS
-                NET_TOOL [$NET_TOOL]
-          HAS_IPV4_STACK [$HAS_IPV4_STACK]
-          HAS_IPV6_STACK [$HAS_IPV6_STACK]
-                   SLEEP [$SLEEP]
-                 TIMEOUT [$TIMEOUT]
-            PROC_NET_TCP [$PROC_NET_TCP]
-                LOCAL_IP [$LOCAL_IP]
-
-            DO_SPEEDTEST [$DO_SPEEDTEST]
-        SPEEDTEST_SCHEME [$SPEEDTEST_SCHEME]
-      SPEEDTEST_HOSTNAME [$SPEEDTEST_HOSTNAME]
-          SPEEDTEST_FQDN [$SPEEDTEST_FQDN]
-          SPEEDTEST_IPV4 [$SPEEDTEST_IPV4]
-          SPEEDTEST_IPV6 [$SPEEDTEST_IPV6]
-          SPEEDTEST_PORT [$SPEEDTEST_PORT]
-      SPEEDTEST_RESOURCE [$SPEEDTEST_RESOURCE]
-           SPEEDTEST_URL [$SPEEDTEST_URL]
-   SPEEDTEST_NETCAT_ARGS [$SPEEDTEST_NETCAT_ARGS]
-
-                 VIP_URL [$VIP_URL]
-         VIP_NETCAT_ARGS [$VIP_NETCAT_ARGS]
-
-                 DO_PING [$DO_PING]
-               PING_FQDN [$PING_FQDN]
-               PING_IPV4 [$PING_IPV4]
-               PING_IPV6 [$PING_IPV6]
-             PING_NEEDED [$PING_NEEDED]
-                   PING4 [$PING4]
-                   PING6 [$PING6]
- =========== NET TOOL
-                     IP4 [$IP4]
-                     IP6 [$IP6]
-                NETSTAT4 [$NETSTAT4]
-                NETSTAT6 [$NETSTAT6]
- =========== IP
-           GATEWAYS_IPV4 [$GATEWAYS_IPV4]
-           GATEWAYS_IPV6 [$GATEWAYS_IPV6]
-            METRICS_IPV4 [$METRICS_IPV4]
-            METRICS_IPV6 [$METRICS_IPV6]
-                  IFACES [$IFACES]
-
- =========== Server
-          SERVE_GATEWAYS [$SERVE_GATEWAYS]
-                  SERVER [$SERVER]
- =========== Client
-          FETCH_GATEWAYS [$FETCH_GATEWAYS]
-              VIP_TARGET [$VIP_TARGET]
-
-    FETCH_SPEEDTEST_IPV4 [$FETCH_SPEEDTEST_IPV4]
-    FETCH_SPEEDTEST_IPV6 [$FETCH_SPEEDTEST_IPV6]
-        SPEEDTEST_TARGET [$SPEEDTEST_TARGET]
- ---------------------------------------------------
-               EXIT_CODE [$EXIT_CODE]
- ---------------------------------------------------"
-}
-
 remove_routes ()
 {
     while read ROUTE
@@ -2980,8 +2905,6 @@ main ()
     trap 'clean_and_exit 129' 1  # HUP (1)  : Hangup detected on controlling terminal or death of controlling process.
     trap 'clean_and_exit 130' 2  # INT (2)  : Program interrupt (usually Ctrl+C). Exit code 130 (128 + 2).
     trap 'clean_and_exit 143' 15 # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
-    echo_conf_vars resolve_transfer_tools
-    exit
 
     case "$ROLE" in
         single)
