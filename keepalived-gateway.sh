@@ -2183,9 +2183,15 @@ EOF
         ;;
     esac
 
-    ROUTE="default via $GATEWAY_IP dev $INTERFACE${METRIC:+" metric $METRIC"}"
-    SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY_IP dev $INTERFACE"
-    PING_ROUTE="${PING_IP:-} via $GATEWAY_IP dev $INTERFACE"
+    is_equal "$NET_TOOL" "ip" && {
+        ROUTE="default via $GATEWAY_IP dev $INTERFACE${METRIC:+" metric $METRIC"}"
+        SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY_IP dev $INTERFACE"
+        PING_ROUTE="${PING_IP:-} via $GATEWAY_IP dev $INTERFACE"
+    } || {
+        ROUTE="default $GATEWAY_IP $INTERFACE ${METRIC:-}"
+        SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} $GATEWAY_IP $INTERFACE"
+        PING_ROUTE="${PING_IP:-} $GATEWAY_IP $INTERFACE"
+    }
 }
 
 is_empty_alive_metrics ()
