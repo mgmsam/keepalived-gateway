@@ -30,7 +30,7 @@
 
 `bit2Human`
 
-- [ ] Заменить `printf` на что-то вроде:
+- [X] Заменить `printf` на что-то вроде:
 
       ```sh
       if test "$REMAINS" -lt 10

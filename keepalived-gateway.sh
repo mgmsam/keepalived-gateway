@@ -2247,7 +2247,12 @@ bit2Human ()
     while test "$BIT" -ge 1000
     do
         REMAINS=$(( (BIT % 1000) / 10 ))
-        REMAINS=$(printf ".%02d" "$REMAINS")
+        if test "$REMAINS" -lt 10
+        then
+            REMAINS=".0$REMAINS"
+        else
+            REMAINS=".$REMAINS"
+        fi
         BIT=$((BIT / 1000))
         SIZE=$((SIZE + 1))
     done
