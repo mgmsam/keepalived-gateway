@@ -2103,12 +2103,6 @@ echo_conf_vars ()
  ---------------------------------------------------"
 }
 
-run_ip ()
-{
-    EXEC="$IP_CMD $@"
-    $EXEC && echo "$EXEC" >&2
-}
-
 remove_routes ()
 {
     while read ROUTE
@@ -2337,7 +2331,7 @@ evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
 
-    run_ip route replace "$SPEEDTEST_ROUTE"
+    control_route "$FAMILY" replace "$SPEEDTEST_ROUTE" >/dev/null 2>&1
     if speedtest "$SPEEDTEST_URL"
     then
         test "$BEST_SPEED" -ge "$BIT" || {
@@ -2345,10 +2339,10 @@ evaluate_speed ()
             BEST_ROUTE="$ROUTE"
             BEST_SPEED="$BIT"
         }
-        run_ip route del "$SPEEDTEST_ROUTE"
+        control_route "$FAMILY" del "$SPEEDTEST_ROUTE" >/dev/null 2>&1
         say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
     else
-        run_ip route del "$SPEEDTEST_ROUTE"
+        control_route "$FAMILY" del "$SPEEDTEST_ROUTE" >/dev/null 2>&1
         say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
         return 1
     fi
@@ -2358,14 +2352,14 @@ evaluate_host ()
 {
     say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
 
-    run_ip route replace "$PING_ROUTE"
+    control_route "$FAMILY" replace "$PING_ROUTE" >/dev/null 2>&1
     check_ping -I "$INTERFACE" "$PING_IP" && {
-        run_ip route del "$PING_ROUTE"
+        control_route "$FAMILY" del "$PING_ROUTE" >/dev/null 2>&1
         say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
     } || {
-        run_ip route del "$PING_ROUTE"
+        control_route "$FAMILY" del "$PING_ROUTE" >/dev/null 2>&1
         say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
             say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
