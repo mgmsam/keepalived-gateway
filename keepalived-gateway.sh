@@ -2349,7 +2349,7 @@ EOF
 
 get_current_routes ()
 {
-    CURRENT_ROUTES=
+    CURRENT_ROUTES=""
     for INTERFACE in $IFACES
     do
         if ROUTES="$(show_routes "$1" -i "$INTERFACE" "default")"
@@ -2389,12 +2389,11 @@ get_obsolete_routes ()
     '
 
     REMOVE_ROUTES="$(awk "$OBSOLETE_FILTER" <<EOF
-$DEFAULT_ROUTES
+$1
 
 $CURRENT_ROUTES
 EOF
     )"
-
     is_not_empty "${REMOVE_ROUTES:-}" || return
 }
 
@@ -2476,14 +2475,14 @@ refresh_routing_table ()
     is_empty "${DEFAULT_GATEWAYS_IPV4:-}" || {
         add_routes -4 "$DEFAULT_ROUTES_IPV4" &&
         get_current_routes -4 &&
-        get_obsolete_routes -4 &&
+        get_obsolete_routes "$DEFAULT_ROUTES_IPV4" &&
         remove_obsolete_routes -4 || :
     }
 
     is_empty "${DEFAULT_GATEWAYS_IPV6:-}" || {
         add_routes -6 "$DEFAULT_ROUTES_IPV6" &&
         get_current_routes -6 &&
-        get_obsolete_routes -6 &&
+        get_obsolete_routes "$DEFAULT_ROUTES_IPV6" &&
         remove_obsolete_routes -6 || :
     }
 }
