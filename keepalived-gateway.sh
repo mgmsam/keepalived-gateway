@@ -985,29 +985,99 @@ resolve_dependencies ()
                 }
             }
         }
-
         END {
             if (substr(family, 1, 1) == "6") {
-                for (i in list6)
-                    list[i] = list6[i]
+                if (count6 > 0) {
                     count = count6
-                    '"$AWK_NATURAL_SORT"'
-                for (i in list4)
-                    list[i] = list4[i]
+                    for (i in list6)
+                        list[i] = list6[i]
+                        '"$AWK_NATURAL_SORT"'
+                }
+                if (count4 > 0) {
                     count = count4
-                    '"$AWK_NATURAL_SORT"'
+                    for (i in list4)
+                        list[i] = list4[i]
+                        '"$AWK_NATURAL_SORT"'
+                }
             } else {
-                for (i in list4)
-                    list[i] = list4[i]
+                if (count4 > 0) {
                     count = count4
-                    '"$AWK_NATURAL_SORT"'
-                for (i in list6)
-                    list[i] = list6[i]
+                    for (i in list4)
+                        list[i] = list4[i]
+                        '"$AWK_NATURAL_SORT"'
+                }
+                if (count6 > 0) {
                     count = count6
-                    '"$AWK_NATURAL_SORT"'
+                    for (i in list6)
+                        list[i] = list6[i]
+                        '"$AWK_NATURAL_SORT"'
+                }
             }
         }
     '
+
+    net_parser ()
+    {
+        FAMILY=""
+        OBJECT=""
+        COMMAND=""
+        INTERFACE=""
+        DESTINATION=""
+        SHIFT="0"
+        while is_diff $# 0
+        do
+            case "${1:-}" in
+                -[46] | -46 | -64)
+                    FAMILY="$1"
+                ;;
+                -d)
+                    DESTINATION="$2"
+                    SHIFT=$((SHIFT + 1))
+                    shift
+                ;;
+                -i)
+                    INTERFACE="$2"
+                    SHIFT=$((SHIFT + 1))
+                    shift
+                ;;
+                address | link | route)
+                    OBJECT="$1"
+                ;;
+                add | del | delete | replace | show | list)
+                    COMMAND="$1"
+                ;;
+                *)
+                    DESTINATION="$1"
+                    SHIFT=$((SHIFT + 1))
+                    break
+                ;;
+            esac
+            SHIFT=$((SHIFT + 1))
+            shift
+        done
+        case "${DESTINATION:-}" in
+            *:*:*)
+                case "${FAMILY:-}" in
+                    "" | *6*)
+                        FAMILY="-6"
+                    ;;
+                    -4)
+                        return 1
+                    ;;
+                esac
+            ;;
+            *.*.*.*)
+                case "${FAMILY:-}" in
+                    "" | *4*)
+                        FAMILY="-4"
+                    ;;
+                    -6)
+                        return 1
+                    ;;
+                esac
+            ;;
+        esac
+    }
 
     if type ip >/dev/null 2>&1
     then
@@ -1052,73 +1122,48 @@ resolve_dependencies ()
             esac
         }
 
-        ip_wrapper ()
-        {
-            case "${1:-}" in
-                *:*)
-                    case "${FAMILY:-}" in
-                        "" | *6*)
-                            FAMILY="-6"
-                        ;;
-                        -4)
-                            return
-                        ;;
-                    esac
-                ;;
-                *.*)
-                    case "${FAMILY:-}" in
-                        "" | *4*)
-                            FAMILY="-4"
-                        ;;
-                        -6)
-                            return
-                        ;;
-                    esac
-                ;;
-            esac
-            ip_family $ACTION "$@"
-        }
-
         control_route ()
         {
-            ACTION=""
-            FAMILY=""
-            case "${1:-}" in
-                -[46] | -46 | -64)
-                    FAMILY="$1"
-                    shift
-                ;;
-            esac
-            case "${1:-}" in
-                add | del | delete | replace | show)
-                    ACTION="route $1"
-                    shift
-                ;;
-                *)
-                    return
-                ;;
-            esac
-            ip_wrapper "$@"
+            net_parser "route" "$@"
+            shift $SHIFT
+            ip_family "route" "$COMMAND" "$@"
         }
 
         show_routes ()
         {
-            FAMILY=""
-            case "${1:-}" in
-                -[46] | -46 | -64)
-                    FAMILY="$1"
-                    shift
-            esac
-            control_route ${FAMILY:-} show "$@"
+            set -- "route" "show" "$@"
+            net_parser "$@"
+            shift $SHIFT
+            ip_family "route" "show" ${DESTINATION:-} "$@" | awk '
+                BEGIN {
+                    interface = "'"${INTERFACE:-}"'"
+                }
+                {
+                    if (interface == "") {
+                        print $0
+                        next
+                    }
+                    for (i = 1; i < NF; i++) {
+                        if ($i == "dev") {
+                            dev_value = $(i+1)
+                            if (dev_value == interface) {
+                                print $0
+                            }
+                            next
+                        }
+                    }
+                }
+            '
         }
 
         show_addresses ()
         {
-            FAMILY="${1:--46}"
-            FAMILY="${FAMILY#-}"
-            ip address show 2>/dev/null | awk '
+            set -- "address" "show" "$@"
+            net_parser "$@"
+            shift $SHIFT
+            ip_family "address" "show" ${INTERFACE:-${DESTINATION:-}} "$@" | awk '
                 BEGIN {
-                    family = '"$FAMILY"'
+                    family = "'"${FAMILY#-}"'"
                 }
                 '"$AWK_ADDRESS_PARSER"'
             '
@@ -1126,12 +1171,14 @@ resolve_dependencies ()
 
         show_interfaces ()
         {
-            ip link show 2>/dev/null | awk '
+            set -- "link" "show" "$@"
+            net_parser "$@"
+            shift $SHIFT
+            ip_family "link" "show" ${INTERFACE:-${DESTINATION:-}} "$@" | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
                 /^[0-9]+:/ {
                     value = $2
                     sub(/:$/, "", value)
-                    sub(/@.*/, "", value)
                     '"$AWK_UNIQUE_COLLECT"'
                 }
                 '"$AWK_NATURAL_SORT_END"'
@@ -1143,11 +1190,11 @@ resolve_dependencies ()
         NET_TOOL="ifconfig"
         show_addresses ()
         {
-            FAMILY="${1:--46}"
-            FAMILY="${FAMILY#-}"
-            ifconfig -a 2>/dev/null | awk '
+            net_parser "$@"
+            shift $SHIFT
+            ifconfig -a ${INTERFACE:-${DESTINATION:-}} 2>/dev/null | awk '
                 BEGIN {
-                    family = '"$FAMILY"'
+                    family = "'"${FAMILY#-}"'"
                 }
                 '"$AWK_ADDRESS_PARSER"'
             '
@@ -1155,9 +1202,11 @@ resolve_dependencies ()
 
         show_interfaces ()
         {
-            ifconfig -a 2>/dev/null | awk '
+            net_parser "$@"
+            shift $SHIFT
+            ifconfig -a ${INTERFACE:-${DESTINATION:-}} 2>/dev/null | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
-                /^[a-zA-Z0-9]/ {
+                /^[^ ]+ / {
                     value = $1
                     sub(/:$/, "", value)
                     '"$AWK_UNIQUE_COLLECT"'
