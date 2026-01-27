@@ -1021,7 +1021,7 @@ resolve_dependencies ()
         FAMILY=""
         OBJECT=""
         COMMAND=""
-        INTERFACE=""
+        NET_DEVICE=""
         DESTINATION=""
         SHIFT="0"
         while is_diff $# 0
@@ -1036,7 +1036,7 @@ resolve_dependencies ()
                     shift
                 ;;
                 -i)
-                    INTERFACE="$2"
+                    NET_DEVICE="$2"
                     SHIFT=$((SHIFT + 1))
                     shift
                 ;;
@@ -1137,7 +1137,7 @@ resolve_dependencies ()
             shift $SHIFT
             ip_family "route" "show" ${DESTINATION:-} "$@" | awk '
                 BEGIN {
-                    interface = "'"${INTERFACE:-}"'"
+                    interface = "'"${NET_DEVICE:-}"'"
                 }
                 {
                     if (interface == "") {
@@ -1162,7 +1162,7 @@ resolve_dependencies ()
             set -- "address" "show" "$@"
             net_parser "$@"
             shift $SHIFT
-            ip_family "address" "show" ${INTERFACE:-${DESTINATION:-}} "$@" | awk '
+            ip_family "address" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
                 BEGIN {
                     family = "'"${FAMILY#-}"'"
                 }
@@ -1175,7 +1175,7 @@ resolve_dependencies ()
             set -- "link" "show" "$@"
             net_parser "$@"
             shift $SHIFT
-            ip_family "link" "show" ${INTERFACE:-${DESTINATION:-}} "$@" | awk '
+            ip_family "link" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
                 /^[0-9]+:/ {
                     value = $2
@@ -1193,7 +1193,7 @@ resolve_dependencies ()
         {
             net_parser "$@"
             shift $SHIFT
-            ifconfig -a ${INTERFACE:-${DESTINATION:-}} 2>/dev/null | awk '
+            ifconfig -a ${NET_DEVICE:-${DESTINATION:-}} 2>/dev/null | awk '
                 BEGIN {
                     family = "'"${FAMILY#-}"'"
                 }
@@ -1205,7 +1205,7 @@ resolve_dependencies ()
         {
             net_parser "$@"
             shift $SHIFT
-            ifconfig -a ${INTERFACE:-${DESTINATION:-}} 2>/dev/null | awk '
+            ifconfig -a ${NET_DEVICE:-${DESTINATION:-}} 2>/dev/null | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
                 /^[^ ]+ / {
                     value = $1
@@ -1371,7 +1371,7 @@ resolve_dependencies ()
                 shift $SHIFT
                 netstat_family -rn | awk '
                     BEGIN {
-                        interface = "'"${INTERFACE:-}"'"
+                        interface = "'"${NET_DEVICE:-}"'"
                         destination = "'"${DESTINATION:-}"'"
                     }
                     $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
@@ -2285,6 +2285,7 @@ check_ping ()
 evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+
     control_route "$FAMILY" replace $SPEEDTEST_ROUTE >/dev/null 2>&1
     if speedtest
     then
