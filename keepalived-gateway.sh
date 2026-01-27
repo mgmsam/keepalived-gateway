@@ -2487,6 +2487,31 @@ refresh_routing_table ()
     }
 }
 
+update_gateways_state ()
+{
+    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:-}$LF${DEFAULT_GATEWAYS_IPV6:-}"
+}
+
+save_gateways_state ()
+{
+    case "${SERVE_GATEWAYS:-}" in
+        "" | "serve_netcat")
+            return
+        ;;
+    esac
+
+    is_dir "${GATEWAYS_STATE_FILE%/*}" ||
+    OUTPUT="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" || {
+        say "error: $OUTPUT"
+        return 1
+    } >&2
+    echo "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
+    mv "$GATEWAYS_STATE_FILE.tmp" "$GATEWAYS_STATE_FILE"  || {
+        say "error: failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
+        return 1
+    } >&2
+}
+
 reconcile_gateways ()
 {
     DEFAULT_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:-}"
@@ -2553,8 +2578,8 @@ reconcile_gateways ()
         sleep 1
     done
 
-    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:-}$LF${DEFAULT_GATEWAYS_IPV6:-}"
     is_equal "$ROLE" "master-advisor" || refresh_routing_table
+    update_gateways_state
 }
 
 sync_gateways ()
@@ -2586,22 +2611,8 @@ sync_gateways ()
         collect_route
     done
 
-    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:-}$LF${DEFAULT_GATEWAYS_IPV6:-}"
     refresh_routing_table
-}
-
-update_gateways_state ()
-{
-    is_dir "${GATEWAYS_STATE_FILE%/*}" ||
-    OUTPUT="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" || {
-        say "error: $OUTPUT"
-        return 1
-    } >&2
-    echo "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
-    mv "$GATEWAYS_STATE_FILE.tmp" "$GATEWAYS_STATE_FILE"  || {
-        say "error: failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
-        return 1
-    } >&2
+    update_gateways_state
 }
 
 is_process_alive ()
@@ -2790,7 +2801,7 @@ run_master_mode ()
     do
         check_gateways || {
             reconcile_gateways
-            update_gateways_state
+            save_gateways_state
         } && serve_gateways || stop_serve_gateways
         say "next check cycle in: '$HUMAN_INTERVAL'"
         sleep "$CHECK_INTERVAL"
@@ -2851,7 +2862,7 @@ run_cluster_mode ()
             }
             check_gateways || {
                 reconcile_gateways
-                update_gateways_state
+                save_gateways_state
             } && serve_gateways || stop_serve_gateways
         else
             case "$STATE" in
