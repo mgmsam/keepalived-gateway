@@ -1124,9 +1124,10 @@ resolve_dependencies ()
 
         control_route ()
         {
-            net_parser "route" "$@"
+            set -- "route" "$@"
+            net_parser "$@"
             shift $SHIFT
-            ip_family "route" "$COMMAND" "$@"
+            ip_family "route" "$COMMAND" "$DESTINATION" "$@"
         }
 
         show_routes ()
@@ -2284,8 +2285,7 @@ check_ping ()
 evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
-
-    control_route "$FAMILY" replace "$SPEEDTEST_ROUTE" >/dev/null 2>&1
+    control_route "$FAMILY" replace $SPEEDTEST_ROUTE
     if speedtest "$SPEEDTEST_URL"
     then
         test "$BEST_SPEED" -ge "$BIT" || {
@@ -2293,10 +2293,10 @@ evaluate_speed ()
             BEST_ROUTE="$ROUTE"
             BEST_SPEED="$BIT"
         }
-        control_route "$FAMILY" del "$SPEEDTEST_ROUTE" >/dev/null 2>&1
+        control_route "$FAMILY" del $SPEEDTEST_ROUTE >/dev/null 2>&1
         say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
     else
-        control_route "$FAMILY" del "$SPEEDTEST_ROUTE" >/dev/null 2>&1
+        control_route "$FAMILY" del $SPEEDTEST_ROUTE >/dev/null 2>&1
         say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
         return 1
     fi
@@ -2306,14 +2306,14 @@ evaluate_host ()
 {
     say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
 
-    control_route "$FAMILY" replace "$PING_ROUTE" >/dev/null 2>&1
+    control_route "$FAMILY" replace $PING_ROUTE >/dev/null 2>&1
     check_ping -I "$INTERFACE" "$PING_IP" && {
-        control_route "$FAMILY" del "$PING_ROUTE" >/dev/null 2>&1
+        control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
         say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
     } || {
-        control_route "$FAMILY" del "$PING_ROUTE" >/dev/null 2>&1
+        control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
         say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
             say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
@@ -2338,7 +2338,7 @@ add_routes ()
     while read ROUTE
     do
         say -n "applying IPv${1#-} route '$ROUTE' ..."
-        control_route "$1" replace "$ROUTE" >/dev/null 2>&1 &&
+        control_route "$1" replace $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
     done <<EOF
@@ -2436,14 +2436,14 @@ check_gateways ()
 
         if is_not_empty "${PING_HOST:-}"
         then
-            control_route "$FAMILY" replace "$PING_ROUTE"
+            control_route "$FAMILY" replace $PING_ROUTE
             check_ping -I "$INTERFACE" "$PING_IP" || {
-                control_route "$FAMILY" del "$PING_ROUTE"
+                control_route "$FAMILY" del $PING_ROUTE
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
                 collect_dead_route
                 continue
             }
-            control_route "$FAMILY" del "$PING_ROUTE"
+            control_route "$FAMILY" del $PING_ROUTE
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
