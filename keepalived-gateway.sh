@@ -2267,11 +2267,9 @@ bit2Human ()
 
 speedtest ()
 {
+    FETCH_TIMEOUT="${SPEEDTEST_TIMEOUT:=15}"
     START_SPEEDTEST="$(get_time)"
-    BYTE="$(
-        2>/dev/null $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
-        $FETCH_SPEEDTEST | wc -c
-    )"
+    BYTE="$(2>/dev/null $FETCH_SPEEDTEST | wc -c)"
     END_SPEEDTEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
     DURATION=$((END_SPEEDTEST - START_SPEEDTEST))
@@ -2288,7 +2286,7 @@ evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
     control_route "$FAMILY" replace $SPEEDTEST_ROUTE >/dev/null 2>&1
-    if speedtest "$SPEEDTEST_URL"
+    if speedtest
     then
         test "$BEST_SPEED" -ge "$BIT" || {
             BEST_GATEWAY="$GATEWAY"
