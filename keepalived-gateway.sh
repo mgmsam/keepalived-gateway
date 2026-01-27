@@ -2400,7 +2400,7 @@ evaluate_gateway ()
     } || say "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
 }
 
-add_route ()
+add_routes ()
 {
     echo
     while read ROUTE
@@ -2468,7 +2468,7 @@ EOF
 remove_obsolete_routes ()
 {
     echo
-    remove_route "$1"
+    remove_routes "$1"
 }
 
 check_gateways ()
@@ -2541,14 +2541,14 @@ refresh_routing_table ()
     EXIT_CODE="0"
 
     is_empty "${DEFAULT_GATEWAYS_IPV4:-}" || {
-        add_route -4 "$DEFAULT_GATEWAYS_IPV4" &&
+        add_routes -4 "$DEFAULT_ROUTES_IPV4" &&
         get_current_routes -4 &&
         get_obsolete_routes -4 &&
         remove_obsolete_routes -4 || :
     }
 
     is_empty "${DEFAULT_GATEWAYS_IPV6:-}" || {
-        add_route -6 "$DEFAULT_GATEWAYS_IPV6" &&
+        add_routes -6 "$DEFAULT_ROUTES_IPV6" &&
         get_current_routes -6 &&
         get_obsolete_routes -6 &&
         remove_obsolete_routes -6 || :
