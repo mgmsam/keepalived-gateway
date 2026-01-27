@@ -1977,7 +1977,7 @@ probe_client_capabilities ()
     PREFIX="environment: role '$ROLE': found '$COMMAND'"
 
     is_equal "$DO_SPEEDTEST" "no" ||
-    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV4:-}}" ||
+    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV6:-}}" ||
     if is_supported_scheme "$3"
     then
         probe_speedtest_fetcher $1 $2
@@ -2190,12 +2190,14 @@ EOF
             PING="${PING6:-}"
             PING_IP="${PING_IPV6:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
+            FETCH_SPEEDTEST="${FETCH_SPEEDTEST_IPV6:-}"
         ;;
         *)
             FAMILY="-4"
             PING="${PING4:-}"
             PING_IP="${PING_IPV4:-}"
             SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
+            FETCH_SPEEDTEST="${FETCH_SPEEDTEST_IPV4:-}"
         ;;
     esac
 
@@ -2335,7 +2337,7 @@ speedtest ()
     START_SPEEDTEST="$(get_time)"
     BYTE="$(
         2>/dev/null $TIMEOUT "${SPEEDTEST_TIMEOUT:=15}" \
-        $DOWNLOAD_CMD $DOWNLOAD_INET $DOWNLOAD_OPTIONS "$SPEEDTEST_URL" | wc -c
+        $FETCH_SPEEDTEST | wc -c
     )"
     END_SPEEDTEST="$(get_time)"
     BYTE=$(( ${BYTE:-0} + 0 ))
