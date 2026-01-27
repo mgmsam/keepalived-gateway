@@ -396,13 +396,13 @@ parse_gateway_entry ()
             say 2 "error: variable 'GATEWAYS': gateway [$NUM]: gateway is empty"
         ;;
         *.*)
-            is_ipv4 "$GATEWAY" && FAMILY="inet" ||
+            is_ipv4 "$GATEWAY" && FAMILY="-4" ||
                 say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
         ;;
         *)
             GATEWAY="${GATEWAY#[}"
             GATEWAY="${GATEWAY%]}"
-            is_ipv6 "$GATEWAY" && FAMILY="inet6" ||
+            is_ipv6 "$GATEWAY" && FAMILY="-6" ||
                 say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
         ;;
     esac
@@ -491,11 +491,11 @@ parse_gateway ()
         NUM=$((NUM + 1))
         parse_gateway_entry
         case "$FAMILY" in
-            inet)
+            -4)
                 collect_gateway_ipv4
                 collect_metrics_ipv4
             ;;
-            inet6)
+            -6)
                 collect_gateway_ipv6
                 collect_metrics_ipv6
             ;;
@@ -720,7 +720,7 @@ parse_resource ()
                 *.*.*.*)
                     is_ipv4 "$HOST" || return 13
                     IPV4="$HOST"
-                    FAMILY="inet"
+                    FAMILY="-4"
                 ;;
                 *)
                     ERROR="unrecognized host format (missing letters or invalid IPv4)"
@@ -738,7 +738,7 @@ parse_resource ()
                     *) return 19 ;;
                 esac
             IPV6="$HOST"
-            FAMILY="inet6"
+            FAMILY="-6"
         ;;
         *:*)
             ERROR="invalid port separator or malformed IPv6"
@@ -1733,11 +1733,11 @@ verify_network_state ()
 
     is_equal "$ROLE" "single" ||
     case "${VIP_FAMILY:-}" in
-        inet)
+        -4)
             ERROR="IPv4 stack or 127.0.0.1 not found"
             is_equal "$HAS_IPV4_STACK" "yes"
         ;;
-        inet6)
+        -6)
             ERROR="IPv6 stack or ::1 not found"
             is_equal "$HAS_IPV6_STACK" "yes"
         ;;
@@ -1801,11 +1801,11 @@ resolve_server ()
     }
 
     case "${VIP_FAMILY:-}" in
-        inet)
+        -4)
             LOCAL_IP="127.0.0.1"
             BIND_IP="$LOCAL_IP"
         ;;
-        inet6)
+        -6)
             LOCAL_IP="127.0.0.1"
             BIND_IP="$LOCAL_IP"
         ;;
@@ -1827,7 +1827,7 @@ resolve_server ()
                 uhttpd | httpd)
                     check_daemon $COMMAND -f -p $BIND_IP:$VIP_PORT && {
                         SERVE_GATEWAYS="serve_httpd"
-                        is_equal "$VIP_FAMILY" inet &&
+                        is_equal "$VIP_FAMILY" IPv4 &&
                             SERVER="$COMMAND -f -p $VIP:$VIP_PORT" ||
                             SERVER="$COMMAND -f -p [$VIP]:$VIP_PORT"
                     }
@@ -1952,17 +1952,17 @@ probe_gateway_fetcher ()
     case "$ROLE" in
         cluster | slave | slave-survivor)
             is_not_empty "${FETCH_GATEWAYS:-}" || {
-                if is_equal "$VIP_FAMILY" "inet"
+                if is_equal "$VIP_FAMILY" "-4"
                 then
                     say -n "$PREFIX: probing IPv4 gateway client capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
                     is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" ||
-                        $1 http 127.0.0.1 IPV4
+                        $1 http 127.0.0.1 IPv4
                 else
                     say -n "$PREFIX: probing IPv6 gateway client capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
                     is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" ||
-                        $1 http [::1] IPV6
+                        $1 http [::1] IPv6
                 fi && {
                     FETCH_GATEWAYS="$2 $VIP_TARGET"
                     say -p " [ OK ]"
