@@ -1366,52 +1366,8 @@ resolve_dependencies ()
 
             show_routes ()
             {
-                FAMILY=""
-                DESTINATION=""
-                while is_diff $# 0
-                do
-                    case "${1:-}" in
-                        -[46] | -46 | -64)
-                            FAMILY="$1"
-                        ;;
-                        -d)
-                            DESTINATION="$2"
-                            shift
-                        ;;
-                        -i)
-                            INTERFACE="$2"
-                            shift
-                        ;;
-                        *)
-                            DESTINATION="$1"
-                            shift
-                            break
-                        ;;
-                    esac
-                    shift
-                done
-                case "${DESTINATION:-}" in
-                    *:*)
-                        case "${FAMILY:-}" in
-                            "" | *6*)
-                                FAMILY="-6"
-                            ;;
-                            -4)
-                                return
-                            ;;
-                        esac
-                    ;;
-                    *.*)
-                        case "${FAMILY:-}" in
-                            "" | *4*)
-                                FAMILY="-4"
-                            ;;
-                            -6)
-                                return
-                            ;;
-                        esac
-                    ;;
-                esac
+                net_parser "$@"
+                shift $SHIFT
                 netstat_family -rn | awk '
                     BEGIN {
                         interface = "'"${INTERFACE:-}"'"
@@ -1421,7 +1377,6 @@ resolve_dependencies ()
                         if (interface != "" && $NF != interface) {
                             next
                         }
-
                         if (destination != "") {
                             match_found = "no"
                             if (destination == $1) {
