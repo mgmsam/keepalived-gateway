@@ -2490,7 +2490,7 @@ refresh_routing_table ()
 
 update_gateways_state ()
 {
-    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:-}$LF${DEFAULT_GATEWAYS_IPV6:-}"
+    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:--}$LF${DEFAULT_GATEWAYS_IPV6:--}"
 }
 
 save_gateways_state ()
@@ -2585,12 +2585,14 @@ reconcile_gateways ()
 
 sync_gateways ()
 {
-    is_diff "${FETCHED_GATEWAYS:-}" "${DEFAULT_GATEWAYS:-}" || {
+    is_not_empty "${FETCHED_GATEWAYS:-}" || return 0
+
+    is_diff "$FETCHED_GATEWAYS" "${DEFAULT_GATEWAYS:-}" || {
         say "local routing state is already up to date"
         refresh_routing_table
         return
     }
-    say "applying new gateway configuration from master (${VIP%/*})"
+    say "applying new gateway configuration from master ($VIP)\n"
 
     DEFAULT_GATEWAYS_IPV4=""
     DEFAULT_GATEWAYS_IPV6=""
@@ -2600,7 +2602,6 @@ sync_gateways ()
     for GATEWAY in ${FETCHED_GATEWAYS_IPV4:-} ${FETCHED_GATEWAYS_IPV6:-}
     do
         format_route
-        echo
         say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP' dev '$INTERFACE'${METRIC:+ with metric $METRIC}"
         is_interface "$INTERFACE" || {
             say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
@@ -2754,11 +2755,11 @@ fetch_gateways ()
     RETRIES=3
     SUCCESS=1
     echo
-    say -n "attempting to fetch gateway state from master (${VIP%/*})..."
+    say -n "attempting to fetch gateway state from master ($VIP)..."
     FETCH_TIMEOUT=1
     while is_diff $COUNT $RETRIES
     do
-        FETCHED_GATEWAYS="$(2>&1 $FETCH_GATEWAYS)" && {
+        FETCHED_GATEWAYS="$(2>/dev/null $FETCH_GATEWAYS)" && {
             SUCCESS=0
             break
         } || COUNT=$((COUNT + 1))
@@ -2766,18 +2767,27 @@ fetch_gateways ()
 
     is_equal $SUCCESS 0 && say -p " [ OK ]" || {
         say -p " [ ERROR ]"
-        say "error: ${FETCHED_GATEWAYS:-}"
+        say "error: ${FETCHED_GATEWAYS:-failed to fetch alive gateways list}"
         FETCHED_GATEWAYS=""
         return 1
     } >&2
 
     is_not_empty "${FETCHED_GATEWAYS:-}" || {
-        say "error: received empty or invalid gateway state from master (${VIP%/*})"
+        say "error: received empty or invalid gateway state from master ($VIP)"
         return 1
     } >&2
+
     FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS%$LF*}"
     FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS#*$LF}"
-    say "received remote state from master (${VIP%/*}):\n  IPv4: [${FETCHED_GATEWAYS_IPV4:-}]\n  IPv6: [${FETCHED_GATEWAYS_IPV6:-}]"
+    FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS_IPV4#-}"
+    FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS_IPV6#-}"
+
+    say "received remote state from master ($VIP):
+  IPv4 [${FETCHED_GATEWAYS_IPV4:-no alive gateways provided}]
+  IPv6 [${FETCHED_GATEWAYS_IPV6:-no alive gateways provided}]"
+
+    is_not_empty "${FETCHED_GATEWAYS_IPV4:-}${FETCHED_GATEWAYS_IPV6:-}" ||
+        FETCHED_GATEWAYS=""
 }
 
 
@@ -2831,7 +2841,10 @@ run_slave_mode ()
                 }
             ;;
             "autonomous")
-                fetch_gateways && {
+                fetch_gateways || {
+                    say "master unreachable"
+                    false
+                } && {
                     echo
                     say "master reachable"
                     set_state "slave-survivor"
