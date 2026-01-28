@@ -1809,8 +1809,8 @@ resolve_server ()
             BIND_IP="$LOCAL_IP"
         ;;
         -6)
-            LOCAL_IP="127.0.0.1"
-            BIND_IP="$LOCAL_IP"
+            LOCAL_IP="::1"
+            BIND_IP="[$LOCAL_IP]"
         ;;
     esac
 
@@ -1857,6 +1857,7 @@ resolve_server ()
             check_gateways_state_file
         ;;
     esac
+    LOCAL_IP=""
 }
 
 detect_curl_client ()
