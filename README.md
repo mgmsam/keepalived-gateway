@@ -51,11 +51,15 @@ sudo vi /etc/keepalived-gateway.conf
 
 The script dynamically adapts its behavior based on the node's role:
 
-- **Single-node**: Operates independently if VIRTUAL_IPADDRESS is empty or commented out. It performs health checks and manages routes locally.
-- **VRRP Master**: Triggered when the VIRTUAL_IPADDRESS is detected on a local interface. The node acts as the leader: it performs health checks and provides the authoritative gateway list to Slave nodes.
-- **VRRP Slave**: Triggered when VIRTUAL_IPADDRESS is defined but not found locally. The node suspends local health checks and synchronizes its routing table by fetching data from the Master node over the network.
-
-> _**NOTE**: The script dynamically switches between Master and Slave modes as the Virtual IP floats between hosts during VRRP failover events_.
+- **single**: Operates independently if `VIRTUAL_IPADDRESS` is empty or commented out. It performs health checks and manages routes locally.
+- **master**: Static Master role. The node performs local health checks, manages its own routes, and provides the gateway list to others via `VIRTUAL_PORT`. If `VIRTUAL_IPADDRESS` is lost, it stops the delivery service.
+- **master-advisor**: Advisor mode. Operates like **master** by providing the gateway list to the cluster, but does NOT apply any routing changes to its own local routing table.
+- **slave**: Static Slave role. The node strictly fetches routing data from the **master** via `VIRTUAL_PORT`. If `VIRTUAL_IPADDRESS` appears on this host, it automatically switches to **single** mode for local management.
+- **slave-survivor**: Hybrid Slave role. Acts as a **slave** while the **master** is reachable. If the **master** fails, it automatically activates local health checks (like **single** mode) to maintain connectivity until the **master** returns.
+- **cluster**: Dynamic HA mode. The node automatically switches between **master** and **slave**:
+  - Acts as **master** (provider) when `VIRTUAL_IPADDRESS` is found locally.
+  - Acts as **slave** (receiver) when `VIRTUAL_IPADDRESS` is missing.
+***NOTE***: In **slave** state, it operates as a survivor, performing local health checks if the current **master** is unreachable.
 
 ## Configuration (keepalived-gateway.conf)
 
@@ -69,12 +73,16 @@ The script dynamically adapts its behavior based on the node's role:
 | SPEEDTEST          | Enable speed testing via gateways (yes/no).         | no
 | SPEEDTEST_HOST     | Host (IP/DNS) for speedtest checks through gateways.| nbg1-speed.hetzner.com
 | SPEEDTEST_SCOPE    | Remote file size used for throughput testing.       | 100MB.bin
+| ROLE               | Operational mode (single, master, cluster, etc.).   | cluster
 | VIRTUAL_IPADDRESS  | VIP (CIDR) used to determine Master/Slave role.     | 192.168.1.1/24
-| GATEWAYS_SYNC_PORT | Network port for gateway list synchronization.      | 8888
+| VIRTUALPORT        | TCP port for gateway data distribution.             | 8888
 
-> _**Note**: The script supports dual-stack environments for gateway monitoring. Gateway addresses, **PING_HOST**, and **SPEEDTEST_HOST** can be defined using either IPv4 or IPv6, and health checks will automatically adapt to the corresponding address family._
->
-> _However, **VIRTUAL_IPADDRESS** currently supports **IPv4 only** for node synchronization. Support for IPv6 synchronization is planned for future updates._
+## Dual-Stack Support
+
+The script is fully IPv4/IPv6 aware. It independently monitors health for both families:
+
+- The gateway's address family determines the stack used for `PING_HOST` and `SPEEDTEST_HOST` checks.
+- Routing tables for IPv4 and IPv6 are managed separately, ensuring that a failure in one stack does not affect the other.
 
 ## Integration with Keepalived
 
@@ -118,9 +126,9 @@ vrrp_instance VI_1 {
 
 2. **Detection**: During the next check, the `keepalived-gateway.sh` script on Node B detects the `VIRTUAL_IPADDRESS` via the `is_vrrp_master` function.
 
-3. **Promotion**: Node B automatically switches from **Slave** to **Master** mode, starts the synchronization server, and begins testing gateways independently.
+3. **Promotion**: Node B automatically switches from **slave** to **master** mode, starts the synchronization server, and begins testing gateways independently.
 
-4. **Recovery**: When Node A returns, the `VIRTUAL_IPADDRESS` moves back to it. Node B detects the loss of the `VIRTUAL_IPADDRESS` and immediately reverts to **Slave** mode, stopping the server and switching back to receiving data over the network.
+4. **Recovery**: When Node A returns, the `VIRTUAL_IPADDRESS` moves back to it. Node B detects the loss of the `VIRTUAL_IPADDRESS` and immediately reverts to **slave** mode, stopping the server and switching back to receiving data over the network.
 
 ## Troubleshooting
 
@@ -166,7 +174,7 @@ vrrp_instance VI_1 {
    Check the gateway list prepared for synchronization:
 
    ```bash
-   cat /tmp/kg/gateways.state
+   cat /tmp/keepalived-gateway/gateways.state
    ```
 
    Example output:
