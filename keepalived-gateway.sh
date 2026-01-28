@@ -764,11 +764,11 @@ verify_config_syntax ()
     }
 
     case "${ROLE:=$DEFAULT_ROLE}" in
-        cluster | master | master-advisor | slave-survivor | single)
+        cluster | master | master-advisor | slave | single)
             DO_PING="yes"
             DO_SPEEDTEST="yes"
         ;;
-        slave)
+        slave-passive)
             DO_PING="no"
             DO_SPEEDTEST="no"
         ;;
@@ -789,7 +789,7 @@ verify_config_syntax ()
         say 2 "error: variable 'METRIC': route metric $ERROR"
 
     is_empty "${GATEWAYS:-}" && {
-        is_equal "$ROLE" "slave" || is_equal "$ROLE" "unknown" ||
+        is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" ||
             say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
     } ||
     case "${GATEWAYS:-}" in
@@ -1246,7 +1246,7 @@ resolve_dependencies ()
     if is_equal "${NET_TOOL:-}" "ip"
     then
         case "$ROLE" in
-            single | slave | slave-survivor | unknown)
+            single | slave | slave-passive | unknown)
             ;;
             *)
                 false
@@ -1461,7 +1461,7 @@ resolve_dependencies ()
             TIMEOUT="timeout"
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    is_equal "$ROLE" "slave" || is_equal "$ROLE" "unknown" || {
+    is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" || {
         is_equal "$DO_PING" "no" &&
         is_equal "$DO_SPEEDTEST" "yes" &&
         is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
@@ -1696,7 +1696,7 @@ verify_network_state ()
         }
     } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
 
-    is_equal "$ROLE" "slave" || {
+    is_equal "$ROLE" "slave-passive" || {
         is_empty "${GATEWAYS_IPV4:-}" || {
             GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
             for GATEWAY in $GATEWAYS_IPV4
@@ -1979,7 +1979,7 @@ probe_speedtest_fetcher ()
 probe_gateway_fetcher ()
 {
     case "$ROLE" in
-        cluster | slave | slave-survivor)
+        cluster | slave | slave-passive)
             is_not_empty "${FETCH_GATEWAYS:-}" || {
                 if is_equal "$VIP_FAMILY" "-4"
                 then
@@ -2076,7 +2076,7 @@ resolve_transfer_tools ()
         single)
             is_equal "$DO_SPEEDTEST" "no" || resolve_client
         ;;
-        slave | slave-survivor)
+        slave | slave-passive)
             resolve_client
         ;;
         *)
@@ -2863,28 +2863,28 @@ run_slave_mode ()
     while :
     do
         case "$STATE" in
-            "slave")
+            "slave-passive")
                 fetch_gateways && sync_gateways || {
                     say "master unreachable"
                     sleep 1
                     continue
                 }
             ;;
-            "slave-survivor")
+            "slave")
                 fetch_gateways && sync_gateways || {
                     say "master unreachable"
-                    set_state "autonomous"
+                    set_state "slave-single"
                     false
                 }
             ;;
-            "autonomous")
+            "slave-single")
                 fetch_gateways || {
                     say "master unreachable"
                     false
                 } && {
                     echo
                     say "master reachable"
-                    set_state "slave-survivor"
+                    set_state "slave"
                     sync_gateways
                 }
             ;;
@@ -2926,11 +2926,11 @@ run_cluster_mode ()
                     }
                     fetch_gateways && sync_gateways || {
                         say "master unreachable"
-                        set_state "$ROLE-slave-survivor"
+                        set_state "$ROLE-slave-single"
                         false
                     }
                 ;;
-                "$ROLE-slave-survivor")
+                "$ROLE-slave-single")
                     fetch_gateways && {
                         echo
                         say "master reachable"
@@ -2980,7 +2980,7 @@ main ()
         master | master-advisor)
             run_master_mode
         ;;
-        slave | slave-survivor)
+        slave | slave-passive)
             run_slave_mode
         ;;
         cluster)
