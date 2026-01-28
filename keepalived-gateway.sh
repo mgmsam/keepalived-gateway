@@ -18,6 +18,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+set -efu
+
 is_diff ()
 {
     case "${1:-}" in
@@ -158,13 +160,13 @@ die ()
     exit "$EXIT_CODE"
 }
 
-eval ': $(:)' 2>/dev/null ||
+eval 'ERROR=$(:)' 2>/dev/null ||
     die "error: POSIX command substitution \$(...) is not supported by this shell."
 
-eval ': $((0))' 2>/dev/null ||
+eval 'ERROR=$((0))' 2>/dev/null ||
     die "error: POSIX arithmetic expansion \$((...)) is not supported by this shell."
 
-eval ': ${ERROR#*:}' 2>/dev/null ||
+eval 'ERROR="${ERROR#*:}"' 2>/dev/null ||
     die "error: POSIX parameter expansion \${VAR#*}, \${VAR%*}, is not supported by this shell."
 
 is_digit ()
@@ -2369,7 +2371,7 @@ add_routes ()
     echo
     while read ROUTE
     do
-        say -n "applying IPv${1#-} route '$ROUTE' ..."
+        say -n "applying IPv${1#-} route '$ROUTE'..."
         control_route "$1" replace $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
