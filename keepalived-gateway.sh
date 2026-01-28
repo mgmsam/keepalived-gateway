@@ -2889,11 +2889,11 @@ run_cluster_mode ()
                     }
                     fetch_gateways && sync_gateways || {
                         say "master unreachable"
-                        set_state "$ROLE-slave-single"
+                        set_state "$ROLE-slave-survivor"
                         false
                     }
                 ;;
-                "$ROLE-slave-single")
+                "$ROLE-slave-survivor")
                     fetch_gateways && {
                         echo
                         say "master reachable"
