@@ -198,14 +198,7 @@ vrrp_instance VI_1 {
    Check if the sync server process is active:
 
    ```bash
-   ps | grep '\(telnetd\|uhttpd\)'
-   ```
-
-   Check if the port is listening:
-
-   ```bash
-   PORT="$(printf "%04X" 8888)"
-   cat /proc/net/tcp /proc/net/tcp6 | grep ":$PORT"
+   ps | grep '\(nc\|u?httpd\|telnetd\)'
    ```
 
 4. ### Inspect Current State
