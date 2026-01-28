@@ -228,7 +228,6 @@ setup_defaults ()
     DEFAULT_ROLE="single"
     DO_PING="no"
     DO_SPEEDTEST="no"
-    PING_NEEDED="no"
 }
 
 include_config ()
@@ -822,7 +821,7 @@ verify_config_syntax ()
             DO_SPEEDTEST="no"
         ;;
         1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
-            DO_SPEEDTEST="yes"
+            DO_SPEEDTEST="$DO_SPEEDTEST"
         ;;
         *)
             DO_SPEEDTEST="no"
@@ -1461,14 +1460,9 @@ resolve_dependencies ()
             TIMEOUT="timeout"
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" || {
-        is_equal "$DO_PING" "no" &&
-        is_equal "$DO_SPEEDTEST" "yes" &&
-        is_not_empty "${SPEEDTEST_IPV4:-${SPEEDTEST_IPV6:-}}" || {
-            type ping >/dev/null 2>&1 && PING_NEEDED="yes" ||
-                say 127 "error: environment: gateway check impossible: 'ping' not found"
-        }
-    }
+    is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" ||
+        type ping >/dev/null 2>&1 ||
+            say 127 "error: environment: gateway check impossible: 'ping' not found"
 
     return "$EXIT_CODE"
 }
@@ -1676,27 +1670,29 @@ verify_network_state ()
     is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" ||
         say "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
 
-    is_equal "$PING_NEEDED" "no" || resolve_ping || {
-        say "error: environment: 'ping' is unusable: network stack support check failed"
-        DO_PING="no"
-        DO_SPEEDTEST="no"
-    }
-
-    is_equal "$DO_PING" "no" || is_empty "${PING_FQDN:-}" || {
-        resolve_fqdn "$PING_FQDN" && {
-            PING_IPV4="${IPV4:-}"
-            PING_IPV6="${IPV6:-}"
-        }
-    } || say "error: variable 'PING_HOST': $ERROR"
-
-    is_equal "$DO_SPEEDTEST" "no" || is_empty "${SPEEDTEST_FQDN:-}" || {
-        resolve_fqdn "$SPEEDTEST_FQDN" && {
-            SPEEDTEST_IPV4="${IPV4:-}"
-            SPEEDTEST_IPV6="${IPV6:-}"
-        }
-    } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
 
     is_equal "$ROLE" "slave-passive" || {
+        if resolve_ping
+        then
+            is_empty "${PING_FQDN:-}" || {
+                resolve_fqdn "$PING_FQDN" && {
+                    PING_IPV4="${IPV4:-}"
+                    PING_IPV6="${IPV6:-}"
+                }
+            } || say "error: variable 'PING_HOST': $ERROR"
+
+            is_equal "$DO_SPEEDTEST" "no" || is_empty "${SPEEDTEST_FQDN:-}" || {
+                resolve_fqdn "$SPEEDTEST_FQDN" && {
+                    SPEEDTEST_IPV4="${IPV4:-}"
+                    SPEEDTEST_IPV6="${IPV6:-}"
+                }
+            } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
+        else
+            say "error: environment: 'ping' is unusable: network stack support check failed"
+            DO_PING="no"
+            DO_SPEEDTEST="no"
+        fi
+
         is_empty "${GATEWAYS_IPV4:-}" || {
             GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
             for GATEWAY in $GATEWAYS_IPV4
@@ -2467,7 +2463,7 @@ check_gateways ()
             continue
         }
 
-        if is_not_empty "${PING_HOST:-}"
+        if is_equal "$DO_PING" "yes"
         then
             control_route "$FAMILY" replace $PING_ROUTE >/dev/null 2>&1
             check_ping -I "$INTERFACE" "$PING_IP" || {
@@ -2585,10 +2581,10 @@ reconcile_gateways ()
                 continue
             }
 
-            is_equal "$SPEEDTEST" yes && evaluate_speed ||
+            is_equal "$DO_SPEEDTEST" "yes" && evaluate_speed ||
             if is_empty "${BEST_ROUTE:-}"
             then
-                if is_not_empty "${PING_HOST:-}"
+                if is_equal "$DO_PING" "yes"
                 then
                     evaluate_host
                 else
