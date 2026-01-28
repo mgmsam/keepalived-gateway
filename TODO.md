@@ -134,6 +134,8 @@
 
          - [X] `netcat` (`nc`)
 
+         - [X] `fetch` (***BSD***)
+
          - [ ] `socat`
 
          - [ ] `ncat`

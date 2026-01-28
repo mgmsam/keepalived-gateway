@@ -1872,7 +1872,28 @@ detect_curl_client ()
             return 1
         ;;
         *URL* | *resolve*)
-            STATUS=" [$3 unsupported]"02
+            STATUS=" [$3 unsupported]"
+            return 2
+        ;;
+        *)
+            STATUS=" [undefined error]"
+            return 3
+    esac
+}
+
+detect_fetch_client ()
+{
+    OUTPUT="$(2>&1 fetch $1://$2:1 || :)"
+    case "${OUTPUT:-}" in
+        *Connection*)
+            return 0
+        ;;
+        *URL*)
+            STATUS=" [unsupported scheme ‘$1’]"
+            return 1
+        ;;
+        *address*)
+            STATUS=" [$3 unsupported]"
             return 2
         ;;
         *)
@@ -1999,7 +2020,7 @@ resolve_client ()
     FETCH_GATEWAYS=""
     FETCH_SPEEDTEST_IPV4=""
     FETCH_SPEEDTEST_IPV6=""
-    CLIENT_LIST="curl wget nc"
+    CLIENT_LIST="curl fetch wget nc"
     for COMMAND in $CLIENT_LIST
     do
         if type "$COMMAND" >/dev/null 2>&1
@@ -2009,6 +2030,11 @@ resolve_client ()
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
                     VIP_TARGET="${VIP_URL:-}"
                     probe_client_capabilities detect_curl_client fetch_curl "http https ftp sftp ftps tftp file scp"
+                ;;
+                fetch)
+                    SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
+                    VIP_TARGET="${VIP_URL:-}"
+                    probe_client_capabilities detect_fetch_client fetch_fetch "http https ftp"
                 ;;
                 wget)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
@@ -2696,6 +2722,11 @@ stop_serve_gateways ()
 fetch_curl ()
 {
     $TIMEOUT $FETCH_TIMEOUT curl -o - "$@"
+}
+
+fetch_fetch ()
+{
+    $TIMEOUT $FETCH_TIMEOUT fetch -o - "$@"
 }
 
 fetch_wget ()
