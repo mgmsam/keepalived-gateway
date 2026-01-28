@@ -51,23 +51,53 @@ sudo vi /etc/keepalived-gateway.conf
 
 The script dynamically adapts its behavior based on the node's role:
 
-- **single**: Operates independently if `VIRTUAL_IPADDRESS` is empty or commented out. It performs health checks and manages routes locally.
-- **master**: Static Master role. The node performs local health checks, manages its own routes, and provides the gateway list to others via `VIRTUAL_PORT`. If `VIRTUAL_IPADDRESS` is lost, it stops the delivery service.
-- **master-advisor**: Advisor mode. Operates like **master** by providing the gateway list to the cluster, but does NOT apply any routing changes to its own local routing table.
-- **slave**: Static Slave role. The node strictly fetches routing data from the **master** via `VIRTUAL_PORT`. If `VIRTUAL_IPADDRESS` appears on this host, it automatically switches to **single** mode for local management.
-- **slave-survivor**: Hybrid Slave role. Acts as a **slave** while the **master** is reachable. If the **master** fails, it automatically activates local health checks (like **single** mode) to maintain connectivity until the **master** returns.
-- **cluster**: Dynamic HA mode. The node automatically switches between **master** and **slave**:
-  - Acts as **master** (provider) when `VIRTUAL_IPADDRESS` is found locally.
-  - Acts as **slave** (receiver) when `VIRTUAL_IPADDRESS` is missing.
-***NOTE***: In **slave** state, it operates as a survivor, performing local health checks if the current **master** is unreachable.
+**single**: Standalone routing management.
+
+  - Grouping: All GATEWAYS are grouped by family (IPv4/v6) and Metric. If the OS kernel does not support route metrics, they are ignored and gateways are grouped by IPv4/v6 only.
+
+  - Selection Algorithm:
+
+    1. If `SPEEDTEST` is enabled: The best gateway per group is determined ONCE at startup based on maximum speed to `SPEEDTEST_HOST`. Then, at `CHECK_INTERVAL`, the selected gateway is monitored via ping (to `PING_HOST` or the gateway itself). If the selected gateway becomes unreachable, a new speed-based selection is triggered.
+
+    2. If `SPEEDTEST` is disabled, but `PING_HOST` is defined: The first gateway in the group that can reach `PING_HOST` is selected.
+
+    3. If both `PING_HOST` and `SPEEDTEST` are disabled: The first ping-responsive gateway in the group is selected.
+
+  - Technical Details: Temporary test routes are created to probe `PING_HOST` and `SPEEDTEST_HOST`. One "best" route is applied to the system for each defined group.
+
+  - `PING_HOST` and `SPEEDTEST_HOST` can be the same. Separation is provided for cases where `SPEEDTEST_HOST` blocks ICMP (ping) requests.
+
+**master**:
+
+  - Operates identically to **single**, but if `VIRTUAL_IPADDRESS` is detected, it starts a distribution service on `VIRTUAL_PORT`.
+
+**master-advisor**:
+
+  - Operates as **master** (checks and distribution) but does NOT apply any routes to its own local routing table.
+
+**slave**:
+
+  - Fetches the gateway list from the **master** and applies it. No local checks are performed unless the **master** is unreachable or `VIRTUAL_IPADDRESS` appears locally, in which case it switches to autonomous **slave-single** mode.
+
+**slave-passive**:
+
+  - Operates as **slave**, but if the **master** is unreachable, it remains in standby mode without performing local health checks.
+
+**cluster**: Dynamic High-Availability mode.
+
+  - Acts as **master** (**cluster-master**) if `VIRTUAL_IPADDRESS` is found locally.
+
+  - Acts as **slave** (**cluster-slave**) if `VIRTUAL_IPADDRESS` is missing.
+
+  - In **slave** state, it uses **slave-single** logic (switches to autonomous checks if the **master** is unreachable).
 
 ## Configuration (keepalived-gateway.conf)
 
 | Parameter          | Description                                         | Example Value
 |--------------------|-----------------------------------------------------|---------------|
 | INTERFACE          | Default network interface for gateways.             | eth0
-| METRIC             | Global default route metric.                        | 10 (default 0)
-| GATEWAYS           | List of gateways in [IFACE=]IP[=METRIC] format.     | 192.168.1.2 2001:db8::1=50 eth1=192.168.3.2=100
+| METRIC             | Global default route metric (default 0).            | 10
+| GATEWAYS           | List of gateways in format: [IFACE=]IP[=METRIC], ...| 192.168.1.2 2001:db8::1=50 eth1=192.168.3.2=100
 | CHECK_INTERVAL     | Interval between health checks.                     | 30s
 | PING_HOST          | Host (IP/DNS) for availability monitoring.          | dns.google
 | SPEEDTEST          | Enable speed testing via gateways (yes/no).         | no
@@ -86,7 +116,16 @@ The script is fully IPv4/IPv6 aware. It independently monitors health for both f
 
 ## Integration with Keepalived
 
-The script relies on a standard Keepalived VRRP instance configuration.
+### Gateway Script Configuration
+
+For the dynamic failover to work, ensure both nodes have the same **VIRTUAL_IPADDRESS** and have the **ROLE** set to `cluster` in `/etc/keepalived-gateway.conf`. Also, define a common synchronization port:
+
+```sh
+# /etc/keepalived-gateway.conf
+ROLE="cluster"
+VIRTUAL_IPADDRESS="192.168.1.1/24"
+VIRTUAL_PORT="8888" # ensure this port is open and not in use by other services
+```
 
 ### Example `/etc/keepalived/keepalived.conf` (Node A)
 
