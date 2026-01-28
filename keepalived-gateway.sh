@@ -1819,9 +1819,10 @@ resolve_server ()
     SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
     for COMMAND in $SYNC_SERVER_LIST
     do
+        say -n "environment: role '$ROLE': server '$COMMAND':"
         if type "$COMMAND" >/dev/null 2>&1
         then
-            say -n "environment: role '$ROLE': found '$COMMAND': probing server capability..."
+            say -n -p " probing server IPv${VIP_FAMILY#-} capability..."
             case "$COMMAND" in
                 nc)
                     detect_netcat_server &&
@@ -1844,10 +1845,11 @@ resolve_server ()
             esac >/dev/null 2>&1 && {
                 say -p " [ OK ]"
                 break
-            }
+            } || say 0 -p " [ FAILED ]"
         else
+            say 0 -p " not found"
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
-        fi || say 0 -p " [ FAILED ]"
+        fi
     done
     case "${SERVE_GATEWAYS:-}" in
         "")
@@ -1954,7 +1956,7 @@ probe_speedtest_fetcher ()
 {
     is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
         is_empty "${SPEEDTEST_IPV4:-}" || {
-            say 0 -n "$PREFIX: probing IPv4 speedtest client capability..."
+            say 0 -n "$PREFIX: probing speedtest IPv4 capability..."
             $1 "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 && {
                 FETCH_SPEEDTEST_IPV4="$2 ${SPEEDTEST_TARGET:-}"
                 say -p " [ OK ]"
@@ -1963,7 +1965,7 @@ probe_speedtest_fetcher ()
     }
     is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
         is_empty "${SPEEDTEST_IPV6:-}" || {
-            say 0 -n "$PREFIX: probing IPv6 speedtest client capability..."
+            say 0 -n "$PREFIX: probing speedtest IPv6 capability..."
             $1 "$SPEEDTEST_SCHEME" [::1] IPv6 && {
                 FETCH_SPEEDTEST_IPV6="$2 ${SPEEDTEST_TARGET:-}"
                 say -p " [ OK ]"
@@ -1979,12 +1981,12 @@ probe_gateway_fetcher ()
             is_not_empty "${FETCH_GATEWAYS:-}" || {
                 if is_equal "$VIP_FAMILY" "-4"
                 then
-                    say -n "$PREFIX: probing IPv4 gateway client capability..."
+                    say 0 -n "$PREFIX: probing gateway sync IPv4 capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
                     is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" ||
                         $1 http 127.0.0.1 IPv4
                 else
-                    say -n "$PREFIX: probing IPv6 gateway client capability..."
+                    say 0 -n "$PREFIX: probing gateway sync IPv6 capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
                     is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" ||
                         $1 http [::1] IPv6
@@ -1999,15 +2001,13 @@ probe_gateway_fetcher ()
 
 probe_client_capabilities ()
 {
-    PREFIX="environment: role '$ROLE': found '$COMMAND'"
-
     is_equal "$DO_SPEEDTEST" "no" ||
     is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV6:-}}" ||
     if is_supported_scheme "$3"
     then
         probe_speedtest_fetcher $1 $2
     else
-        say "$PREFIX: probing speedtest client capability... [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
+        say "$PREFIX: speedtest: [unsupported scheme ‘$SPEEDTEST_SCHEME’]"
     fi
 
     probe_gateway_fetcher $1 $2
@@ -2023,8 +2023,11 @@ resolve_client ()
     CLIENT_LIST="curl fetch wget nc"
     for COMMAND in $CLIENT_LIST
     do
+        PREFIX="environment: role '$ROLE': client '$COMMAND'"
+        say -n "$PREFIX:"
         if type "$COMMAND" >/dev/null 2>&1
         then
+            say 0 -p " found"
             case "$COMMAND" in
                 curl)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
@@ -2051,6 +2054,7 @@ resolve_client ()
                 return
             } || continue
         else
+            say 0 -p " not found"
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         fi
     done
