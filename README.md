@@ -53,7 +53,7 @@ The script dynamically adapts its behavior based on the node's role:
 
 **single**: Standalone routing management.
 
-  - Grouping: All GATEWAYS are grouped by family (IPv4/v6) and Metric. If the OS kernel does not support route metrics, they are ignored and gateways are grouped by IPv4/v6 only.
+  - Grouping: All `GATEWAYS` are grouped by family (IPv4/v6) and Metric. If the OS kernel does not support route metrics, they are ignored and gateways are grouped by IPv4/v6 only.
 
   - Selection Algorithm:
 
