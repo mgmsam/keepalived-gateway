@@ -2815,9 +2815,9 @@ fetch_gateways ()
     FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS_IPV4#-}"
     FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS_IPV6#-}"
 
-    say "received remote state from master ($VIP):
-  IPv4 [${FETCHED_GATEWAYS_IPV4:-no alive gateways provided}]
-  IPv6 [${FETCHED_GATEWAYS_IPV6:-no alive gateways provided}]"
+    say "received remote state from master ($VIP):"
+    say "  IPv4 [${FETCHED_GATEWAYS_IPV4:-no alive gateways provided}]"
+    say "  IPv6 [${FETCHED_GATEWAYS_IPV6:-no alive gateways provided}]"
 
     is_not_empty "${FETCHED_GATEWAYS_IPV4:-}${FETCHED_GATEWAYS_IPV6:-}" ||
         FETCHED_GATEWAYS=""
