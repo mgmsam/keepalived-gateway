@@ -1,7 +1,7 @@
 #!/bin/sh
 # keepalived-gateway.sh. Gateway switcher.
 #
-# Copyright (c) 2025 Semyon A Mironov
+# Copyright (c) 2025-2026 Semyon A Mironov
 #
 # Authors: Semyon A Mironov <s.mironov@mgmsam.pro>
 #
@@ -2126,7 +2126,7 @@ remove_test_route ()
 clean_and_exit ()
 {
     EXIT_CODE="${1:-$?}"
-    echo
+    puts
     trap - 0
     remove_test_route || :
     is_empty "${GATEWAY_SERVER_PID:-}" || kill "$GATEWAY_SERVER_PID" 2>/dev/null
@@ -2291,7 +2291,7 @@ bit2Human ()
     set -- bit Kbit Mbit Gbit Tbit Ebit Pbit Zbit Ybit
     shift $((SIZE - 1))
     UNIT="$1"
-    echo "$BIT${REMAINS:-} $UNIT"
+    puts "$BIT${REMAINS:-} $UNIT"
 }
 
 speedtest ()
@@ -2364,7 +2364,7 @@ evaluate_gateway ()
 
 add_routes ()
 {
-    echo
+    puts
     while read ROUTE
     do
         say -n "applying IPv${1#-} route '$ROUTE'..."
@@ -2385,7 +2385,7 @@ get_current_routes ()
         then
             while read ROUTE
             do
-                ROUTE=$(echo $ROUTE)
+                ROUTE=$(puts $ROUTE)
                 CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
             done <<EOF
 $ROUTES
@@ -2428,7 +2428,7 @@ EOF
 
 remove_obsolete_routes ()
 {
-    echo
+    puts
     remove_routes "$1"
 }
 
@@ -2454,7 +2454,7 @@ check_gateways ()
     for GATEWAY in ${DEFAULT_GATEWAYS_IPV4:-} ${DEFAULT_GATEWAYS_IPV6:-}
     do
         format_route
-        echo
+        puts
         say "checking active IPv${FAMILY#-} route: '$ROUTE'"
 
         is_interface "$INTERFACE" || {
@@ -2534,7 +2534,7 @@ save_gateways_state ()
         say "error: $OUTPUT"
         return 1
     } >&2
-    echo "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
+    puts "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
     mv "$GATEWAYS_STATE_FILE.tmp" "$GATEWAYS_STATE_FILE"  || {
         say "error: failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
         return 1
@@ -2558,7 +2558,7 @@ reconcile_gateways ()
         for GATEWAY in ${GATEWAYS_IPV4:-} ${GATEWAYS_IPV6:-}
         do
             format_route
-            echo
+            puts
             say "testing IPv${FAMILY#-} gateway '$GATEWAY_IP' dev '$INTERFACE'${METRIC:+ with metric $METRIC}"
 
             is_equal "${CURRENT_FAMILY:-}" "$FAMILY" &&
@@ -2600,7 +2600,7 @@ reconcile_gateways ()
         }
 
         is_empty "${DEFAULT_GATEWAYS_IPV4:-}${DEFAULT_GATEWAYS_IPV6:-}" || break
-        echo
+        puts
         say "WARNING: no alive gateways found, retrying in 1s..."
         is_diff "$STATE" "slave-survivor" || return
 
@@ -2787,7 +2787,7 @@ fetch_gateways ()
     COUNT=0
     RETRIES=3
     SUCCESS=1
-    echo
+    puts
     say -n "attempting to fetch gateway state from master ($VIP)..."
     FETCH_TIMEOUT=1
     while is_diff $COUNT $RETRIES
@@ -2826,7 +2826,7 @@ fetch_gateways ()
 
 run_single_mode ()
 {
-    echo
+    puts
     set_state "$ROLE"
     while :
     do
@@ -2839,7 +2839,7 @@ run_single_mode ()
 run_master_mode ()
 {
     GATEWAY_SERVER_PID=""
-    echo
+    puts
     set_state "$ROLE"
     while :
     do
@@ -2854,7 +2854,7 @@ run_master_mode ()
 
 run_slave_mode ()
 {
-    echo
+    puts
     set_state "$ROLE"
     while :
     do
@@ -2878,7 +2878,7 @@ run_slave_mode ()
                     say "master unreachable"
                     false
                 } && {
-                    echo
+                    puts
                     say "master reachable"
                     set_state "slave"
                     sync_gateways
@@ -2903,7 +2903,7 @@ run_cluster_mode ()
         if is_vrrp_master
         then
             is_equal "$STATE" "$ROLE-master" || {
-                echo
+                puts
                 say "virtual IP detected on this host: '$VIP'"
                 set_state "$ROLE-master"
             }
@@ -2916,7 +2916,7 @@ run_cluster_mode ()
                 "$ROLE-slave" | "$ROLE-master" | init)
                     is_equal "$STATE" "$ROLE-slave" || {
                         is_diff "$STATE" "$ROLE-master" || stop_serve_gateways
-                        echo
+                        puts
                         say "virtual IP not found on this host: '$VIP'"
                         set_state "$ROLE-slave"
                     }
@@ -2928,7 +2928,7 @@ run_cluster_mode ()
                 ;;
                 "$ROLE-slave-single")
                     fetch_gateways && {
-                        echo
+                        puts
                         say "master reachable"
                         set_state "$ROLE-slave"
                         sync_gateways
