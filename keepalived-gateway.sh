@@ -143,7 +143,7 @@ say ()
 
     is_empty "$*" || {
         case "$NO_PREFIX" in
-            "no")
+            no)
                 puts "${LOG_PREFIX:-$0: }${1:+$*}"
             ;;
             *)
@@ -603,7 +603,7 @@ parse_resource ()
         ;;
     esac
     case "$HOST" in
-        "www."*)
+        www.*)
             WWW=1
         ;;
     esac
@@ -768,11 +768,11 @@ verify_config_syntax ()
     }
 
     case "${ROLE:=$DEFAULT_ROLE}" in
-        "cluster" | "master" | "master-advisor" | "slave" | "single")
+        cluster | master | master-advisor | slave | single)
             DO_PING="yes"
             DO_SPEEDTEST="yes"
         ;;
-        "slave-passive")
+        slave-passive)
             DO_PING="no"
             DO_SPEEDTEST="no"
         ;;
@@ -1044,10 +1044,10 @@ resolve_dependencies ()
                     SHIFT=$((SHIFT + 1))
                     shift
                 ;;
-                "address" | "link" | "route")
+                address | link | route)
                     OBJECT="$1"
                 ;;
-                "add" | "del" | "delete" | "replace" | "show" | "list")
+                add | del | delete | replace | show | list)
                     COMMAND="$1"
                 ;;
                 *)
@@ -1294,10 +1294,10 @@ resolve_dependencies ()
                 for i in $PROC_NET_TCP
                 do
                     case "$i" in
-                        *"tcp"*)
+                        *tcp*)
                             STATE_FILTER="0A"
                         ;;
-                        *"udp"*)
+                        *udp*)
                             STATE_FILTER="[0-9A-F]+"
                         ;;
                     esac
@@ -1430,7 +1430,7 @@ resolve_dependencies ()
                 shift "$SHIFT"
                 ERROR=$(
                     case "$COMMAND" in
-                        "replace")
+                        replace)
                             route del "$DESTINATION" 2>/dev/null || :
                             route add "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
                         ;;
@@ -1449,7 +1449,7 @@ resolve_dependencies ()
                 shift "$SHIFT"
                 ERROR=$(
                     case "$COMMAND" in
-                        "replace")
+                        replace)
                             route del "$DESTINATION" 2>/dev/null || :
                             route add "$DESTINATION" "$1"
                         ;;
@@ -1669,10 +1669,10 @@ verify_network_state ()
     for IP in ${LOCAL_IP:-}
     do
         case "$IP" in
-            "127.0.0.1")
+            127.0.0.1)
                 HAS_IPV4_STACK="yes"
             ;;
-            "::1")
+            ::1)
                 HAS_IPV6_STACK="yes"
             ;;
         esac
@@ -1845,11 +1845,11 @@ resolve_server ()
         then
             say -n -p " probing server IPv${VIP_FAMILY#-} capability..."
             case "$COMMAND" in
-                "nc")
+                nc)
                     detect_netcat_server &&
                         SERVE_GATEWAYS="serve_netcat"
                 ;;
-                "uhttpd" | "httpd")
+                uhttpd | httpd)
                     check_daemon $COMMAND -f -p $BIND_IP:$VIP_PORT && {
                         SERVE_GATEWAYS="serve_httpd"
                         is_equal "$VIP_FAMILY" IPv4 &&
@@ -1857,7 +1857,7 @@ resolve_server ()
                             SERVER="$COMMAND -f -p [$VIP]:$VIP_PORT"
                     }
                 ;;
-                "telnetd")
+                telnetd)
                     check_daemon $COMMAND -F -p $VIP_PORT -b $LOCAL_IP && {
                         SERVE_GATEWAYS="serve_telnetd"
                         SERVER="$COMMAND -F -p $VIP_PORT -b $VIP -l : -K"
@@ -1897,14 +1897,14 @@ detect_curl_client ()
 {
     OUTPUT=$(2>&1 curl $1://$2:1 || :)
     case "${OUTPUT:-}" in
-        *[Cc]"onnect"*)
+        *[Cc]onnect*)
             return 0
         ;;
-        *[Pp]"rotocol"*)
+        *[Pp]rotocol*)
             STATUS=" [unsupported scheme ‘$1’]"
             return 1
         ;;
-        *"URL"* | *"resolve"*)
+        *URL* | *resolve*)
             STATUS=" [$3 unsupported]"
             return 2
         ;;
@@ -1918,14 +1918,14 @@ detect_fetch_client ()
 {
     OUTPUT=$(2>&1 fetch $1://$2:1 || :)
     case "${OUTPUT:-}" in
-        *[Cc]"onnection"*)
+        *[Cc]onnection*)
             return 0
         ;;
-        *"URL"*)
+        *URL*)
             STATUS=" [unsupported scheme ‘$1’]"
             return 1
         ;;
-        *"address"*)
+        *address*)
             STATUS=" [$3 unsupported]"
             return 2
         ;;
@@ -1939,10 +1939,10 @@ detect_netcat_client ()
 {
     OUTPUT=$(2>&1 nc $2 1 || :)
     case "${OUTPUT:-}" in
-        "" | *[Cc]"onnection"*)
+        "" | *[Cc]onnection*)
             return 0
         ;;
-        *"family"* | *"resolve"*)
+        *family* | *resolve*)
             STATUS=" [$3 unsupported]"
             return 1
         ;;
@@ -1956,14 +1956,14 @@ detect_wget_client ()
 {
     OUTPUT=$(2>&1 wget $1://$2:1 || :)
     case "${OUTPUT:-}" in
-        *[Cc]"onnection"*)
+        *[Cc]onnection*)
             return 0
         ;;
-        *"family"* | *"socket"*)
+        *family* | *socket*)
             STATUS=" [$3 unsupported]"
             return 1
         ;;
-        *"support"* | *"http"* | *"ftp"*)
+        *support* | *http* | *ftp*)
             STATUS=" [unsupported scheme ‘$1’]"
             return 2
         ;;
@@ -1998,7 +1998,7 @@ probe_speedtest_fetcher ()
 probe_gateway_fetcher ()
 {
     case "$ROLE" in
-        "cluster" | "slave" | "slave-passive")
+        cluster | slave | slave-passive)
             is_not_empty "${FETCH_GATEWAYS:-}" || {
                 if is_equal "$VIP_FAMILY" "-4"
                 then
@@ -2050,22 +2050,22 @@ resolve_client ()
         then
             say 0 -p " found"
             case "$COMMAND" in
-                "curl")
+                curl)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
                     VIP_TARGET="${VIP_URL:-}"
                     probe_client_capabilities detect_curl_client fetch_curl "http https ftp sftp ftps tftp file scp"
                 ;;
-                "fetch")
+                fetch)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
                     VIP_TARGET="${VIP_URL:-}"
                     probe_client_capabilities detect_fetch_client fetch_fetch "http https ftp"
                 ;;
-                "nc")
+                nc)
                     SPEEDTEST_TARGET="${SPEEDTEST_NETCAT_ARGS:-}"
                     VIP_TARGET="${VIP_NETCAT_ARGS:-}"
                     probe_client_capabilities detect_netcat_client fetch_netcat http
                 ;;
-                "wget")
+                wget)
                     SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
                     VIP_TARGET="${VIP_URL:-}"
                     probe_client_capabilities detect_wget_client fetch_wget "http https ftp ftps"
@@ -2084,18 +2084,18 @@ resolve_client ()
 resolve_transfer_tools ()
 {
     case "$ROLE" in
-        "cluster")
+        cluster)
             resolve_server
             resolve_client
         ;;
-        "master" | "master-advisor")
+        master | master-advisor)
             resolve_server
             is_equal "$DO_SPEEDTEST" "no" || resolve_client
         ;;
-        "single")
+        single)
             is_equal "$DO_SPEEDTEST" "no" || resolve_client
         ;;
-        "slave" | "slave-passive")
+        slave | slave-passive)
             resolve_client
         ;;
         *)
@@ -2618,7 +2618,7 @@ say_gateways_state ()
 save_gateways_state ()
 {
     case "${SERVE_GATEWAYS:-}" in
-        "" | "serve_netcat")
+        "" | serve_netcat)
             return
         ;;
     esac
@@ -2762,7 +2762,7 @@ $CR
 EOF
     } ||
     case $? in
-        "124")
+        124)
             return 0
         ;;
         *)
@@ -2889,21 +2889,21 @@ run_slave_mode ()
     while loop
     do
         case "$STATE" in
-            "slave-passive")
+            slave-passive)
                 fetch_gateways && sync_gateways || {
                     say "master unreachable"
                     sleep 1
                     continue
                 }
             ;;
-            "slave")
+            slave)
                 fetch_gateways && sync_gateways || {
                     say "master unreachable"
                     set_state "slave-single"
                     false
                 }
             ;;
-            "slave-single")
+            slave-single)
                 fetch_gateways || {
                     say "master unreachable"
                     false
@@ -2944,24 +2944,24 @@ run_cluster_mode ()
             say_gateways_state
         else
             case "$STATE" in
-                "$ROLE-slave" | "$ROLE-master" | init)
-                    is_equal "$STATE" "$ROLE-slave" || {
-                        is_diff "$STATE" "$ROLE-master" || stop_serve_gateways
+                cluster-slave | cluster-master | init)
+                    is_equal "$STATE" cluster-slave || {
+                        is_diff "$STATE" cluster-master || stop_serve_gateways
                         puts
                         say "virtual IP not found on this host: '$VIP'"
-                        set_state "$ROLE-slave"
+                        set_state cluster-slave
                     }
                     fetch_gateways && sync_gateways || {
                         say "master unreachable"
-                        set_state "$ROLE-slave-single"
+                        set_state cluster-slave-single
                         false
                     }
                 ;;
-                "$ROLE-slave-single")
+                cluster-slave-single)
                     fetch_gateways && {
                         puts
                         say "master reachable"
-                        set_state "$ROLE-slave"
+                        set_state cluster-slave
                         sync_gateways
                     }
                 ;;
@@ -3001,16 +3001,16 @@ main ()
     trap 'clean_and_exit 143' 15 # TERM (15): Termination signal (default for 'kill' command). Exit code 143 (128 + 15).
 
     case "$ROLE" in
-        "single")
+        single)
             run_single_mode
         ;;
-        "master" | "master-advisor")
+        master | master-advisor)
             run_master_mode
         ;;
-        "slave" | "slave-passive")
+        slave | slave-passive)
             run_slave_mode
         ;;
-        "cluster")
+        cluster)
             run_cluster_mode
         ;;
     esac
