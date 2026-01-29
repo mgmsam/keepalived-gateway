@@ -2159,6 +2159,11 @@ clean_and_exit ()
     exit "$EXIT_CODE"
 }
 
+loop ()
+{
+    :
+}
+
 format_route ()
 {
     IFS="="
@@ -2543,7 +2548,7 @@ reconcile_gateways ()
     BEST_ROUTE=""
     BEST_SPEED=0
 
-    while :
+    while loop
     do
         for GATEWAY in ${GATEWAYS_IPV4:-} ${GATEWAYS_IPV6:-}
         do
@@ -2648,7 +2653,7 @@ serve_netcat ()
         exit
     ' 0 1 2 15
 
-    while :
+    while loop
     do
         $SERVER <<EOF &
 HTTP/1.1 200 OK$CR
@@ -2851,7 +2856,7 @@ run_single_mode ()
 {
     puts
     set_state "$ROLE"
-    while :
+    while loop
     do
         check_gateways || reconcile_gateways
         say_gateways_state
@@ -2865,7 +2870,7 @@ run_master_mode ()
     GATEWAY_SERVER_PID=""
     puts
     set_state "$ROLE"
-    while :
+    while loop
     do
         check_gateways || {
             reconcile_gateways
@@ -2881,7 +2886,7 @@ run_slave_mode ()
 {
     puts
     set_state "$ROLE"
-    while :
+    while loop
     do
         case "$STATE" in
             "slave-passive")
@@ -2923,7 +2928,7 @@ run_slave_mode ()
 run_cluster_mode ()
 {
     GATEWAY_SERVER_PID=""
-    while :
+    while loop
     do
         if is_vrrp_master
         then
