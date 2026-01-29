@@ -2645,6 +2645,14 @@ sync_gateways ()
     update_gateways_state
 }
 
+say_gateways_state ()
+{
+    puts
+    say "optimized gateway state:"
+    say "  IPv4 [${DEFAULT_GATEWAYS_IPV4:-no alive gateways provided}]"
+    say "  IPv6 [${DEFAULT_GATEWAYS_IPV6:-no alive gateways provided}]"
+}
+
 is_process_alive ()
 {
     is_not_empty "${1:-}" &&
@@ -2831,6 +2839,7 @@ run_single_mode ()
     while :
     do
         check_gateways || reconcile_gateways
+        say_gateways_state
         say "next check cycle in: '$HUMAN_INTERVAL'"
         sleep "$CHECK_INTERVAL"
     done
@@ -2847,6 +2856,7 @@ run_master_mode ()
             reconcile_gateways
             save_gateways_state
         } && serve_gateways || stop_serve_gateways
+        say_gateways_state
         say "next check cycle in: '$HUMAN_INTERVAL'"
         sleep "$CHECK_INTERVAL"
     done
@@ -2911,6 +2921,7 @@ run_cluster_mode ()
                 reconcile_gateways
                 save_gateways_state
             } && serve_gateways || stop_serve_gateways
+            say_gateways_state
         else
             case "$STATE" in
                 "$ROLE-slave" | "$ROLE-master" | init)
