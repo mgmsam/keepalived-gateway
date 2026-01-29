@@ -507,8 +507,8 @@ parse_gateway ()
         is_empty "${INTERFACE:-}" || collect_interface
     done
 
-    TOTAL_METRICS_IPV4="$(count_metrics "${METRICS_IPV4:-}")"
-    TOTAL_METRICS_IPV6="$(count_metrics "${METRICS_IPV6:-}")"
+    TOTAL_METRICS_IPV4=$(count_metrics "${METRICS_IPV4:-}")
+    TOTAL_METRICS_IPV6=$(count_metrics "${METRICS_IPV6:-}")
 }
 
 parse_interval ()
@@ -810,7 +810,7 @@ verify_config_syntax ()
 
     parse_interval "${CHECK_INTERVAL:=30}" && {
         CHECK_INTERVAL="$INTERVAL"
-        HUMAN_INTERVAL="$(format_duration "$CHECK_INTERVAL")"
+        HUMAN_INTERVAL=$(format_duration "$CHECK_INTERVAL")
     } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y]"
 
     is_empty "${PING_HOST:-}" && DO_PING="no" || {
@@ -1517,7 +1517,7 @@ resolve_ping ()
 resolve_fqdn ()
 {
     is_empty "${PING4:-}" ||
-        IPV4="$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
+        IPV4=$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
                 gsub(/[][)(:]/, " ", $0)
                 for (ip=1; ip<=NF; ip++) {
@@ -1527,10 +1527,10 @@ resolve_fqdn ()
                     }
                 }
             }
-        ')" || :
+        ') || :
 
     is_empty "${PING6:-}" ||
-        IPV6="$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
+        IPV6=$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
                 gsub(/[][)(]/, " ")
                 for (ip=1; ip<=NF; ip++) {
@@ -1541,7 +1541,7 @@ resolve_fqdn ()
                     }
                 }
             }
-        ')" || :
+        ') || :
 
     if is_empty "${IPV4:+${IPV6:-}}" && is_file "/etc/hosts"
     then
@@ -1651,7 +1651,7 @@ verify_network_state ()
 {
     HAS_IPV4_STACK="no"
     HAS_IPV6_STACK="no"
-    LOCAL_IP="$(show_addresses)"
+    LOCAL_IP=$(show_addresses)
 
     for IP in ${LOCAL_IP:-}
     do
@@ -1692,7 +1692,7 @@ verify_network_state ()
         fi
 
         is_empty "${GATEWAYS_IPV4:-}" || {
-            GATEWAYS_IPV4="$(optimize_gateways "$GATEWAYS_IPV4")"
+            GATEWAYS_IPV4=$(optimize_gateways "$GATEWAYS_IPV4")
             for GATEWAY in $GATEWAYS_IPV4
             do
                 verify_gateway_remote ||
@@ -1711,7 +1711,7 @@ verify_network_state ()
         }
 
         is_empty "${GATEWAYS_IPV6:-}" || {
-            GATEWAYS_IPV6="$(optimize_gateways "$GATEWAYS_IPV6")"
+            GATEWAYS_IPV6=$(optimize_gateways "$GATEWAYS_IPV6")
             for GATEWAY in $GATEWAYS_IPV6
             do
                 verify_gateway_remote ||
@@ -1806,8 +1806,8 @@ resolve_server ()
     check_gateways_state_file ()
     {
         is_dir "${GATEWAYS_STATE_FILE%/*}" ||
-            OUTPUT="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" &&
-            OUTPUT="$(2>&1 > "$GATEWAYS_STATE_FILE")" ||
+            OUTPUT=$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}") &&
+            OUTPUT=$(2>&1 > "$GATEWAYS_STATE_FILE") ||
                 say "error: $OUTPUT"
     }
 
@@ -1882,7 +1882,7 @@ is_supported_scheme ()
 
 detect_curl_client ()
 {
-    OUTPUT="$(2>&1 curl $1://$2:1 || :)"
+    OUTPUT=$(2>&1 curl $1://$2:1 || :)
     case "${OUTPUT:-}" in
         *[Cc]"onnect"*)
             return 0
@@ -1903,7 +1903,7 @@ detect_curl_client ()
 
 detect_fetch_client ()
 {
-    OUTPUT="$(2>&1 fetch $1://$2:1 || :)"
+    OUTPUT=$(2>&1 fetch $1://$2:1 || :)
     case "${OUTPUT:-}" in
         *[Cc]"onnection"*)
             return 0
@@ -1924,7 +1924,7 @@ detect_fetch_client ()
 
 detect_netcat_client ()
 {
-    OUTPUT="$(2>&1 nc $2 1 || :)"
+    OUTPUT=$(2>&1 nc $2 1 || :)
     case "${OUTPUT:-}" in
         "" | *[Cc]"onnection"*)
             return 0
@@ -1941,7 +1941,7 @@ detect_netcat_client ()
 
 detect_wget_client ()
 {
-    OUTPUT="$(2>&1 wget $1://$2:1 || :)"
+    OUTPUT=$(2>&1 wget $1://$2:1 || :)
     case "${OUTPUT:-}" in
         *[Cc]"onnection"*)
             return 0
@@ -2111,7 +2111,7 @@ remove_test_route ()
 
     for IP in ${PING_IPV4:-} ${SPEEDTEST_IPV4:-}
     do
-        ROUTE="$(show_routes -4 "$IP")"
+        ROUTE=$(show_routes -4 "$IP")
         is_empty "${ROUTE:-}" ||
             REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
     done
@@ -2123,7 +2123,7 @@ remove_test_route ()
 
     for IP in ${PING_IPV6:-} ${SPEEDTEST_IPV6:-}
     do
-        ROUTE="$(show_routes -6 "$IP")"
+        ROUTE=$(show_routes -6 "$IP")
         is_empty "${ROUTE:-}" ||
             REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
     done
@@ -2203,13 +2203,13 @@ collect_alive_route ()
 {
     case "$FAMILY" in
         -4)
-            ALIVE_COUNT_IPV4="$((ALIVE_COUNT_IPV4 + 1))"
+            ALIVE_COUNT_IPV4=$((ALIVE_COUNT_IPV4 + 1))
             ALIVE_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:+$ALIVE_GATEWAYS_IPV4 }$GATEWAY"
             ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+$ALIVE_METRICS_IPV4 }${METRIC:-0}"
             ALIVE_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:+$ALIVE_ROUTES_IPV4$LF}$ROUTE"
         ;;
         -6)
-            ALIVE_COUNT_IPV6="$((ALIVE_COUNT_IPV6 + 1))"
+            ALIVE_COUNT_IPV6=$((ALIVE_COUNT_IPV6 + 1))
             ALIVE_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:+$ALIVE_GATEWAYS_IPV6 }$GATEWAY"
             ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+$ALIVE_METRICS_IPV6 }${METRIC:-0}"
             ALIVE_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:+$ALIVE_ROUTES_IPV6$LF}$ROUTE"
@@ -2351,9 +2351,9 @@ get_time ()
 speedtest ()
 {
     FETCH_TIMEOUT="${SPEEDTEST_TIMEOUT:=15}"
-    START_SPEEDTEST="$(get_time)"
-    BYTE="$(2>/dev/null $FETCH_SPEEDTEST | wc -c)"
-    END_SPEEDTEST="$(get_time)"
+    START_SPEEDTEST=$(get_time)
+    BYTE=$(2>/dev/null $FETCH_SPEEDTEST | wc -c)
+    END_SPEEDTEST=$(get_time)
     BYTE=$(( ${BYTE:-0} + 0 ))
     DURATION=$((END_SPEEDTEST - START_SPEEDTEST))
     test "$DURATION" -gt 0 || DURATION=1
@@ -2448,7 +2448,7 @@ get_current_routes ()
     CURRENT_ROUTES=""
     for INTERFACE in $IFACES
     do
-        if ROUTES="$(show_routes "$1" -i "$INTERFACE" "default")"
+        if ROUTES=$(show_routes "$1" -i "$INTERFACE" "default")
         then
             while read ROUTE
             do
@@ -2480,12 +2480,12 @@ get_obsolete_routes ()
             print $0
         }
     '
-    REMOVE_ROUTES="$(awk "$OBSOLETE_FILTER" <<EOF
+    REMOVE_ROUTES=$(awk "$OBSOLETE_FILTER" <<EOF
 $1
 
 $CURRENT_ROUTES
 EOF
-    )"
+    )
     is_not_empty "${REMOVE_ROUTES:-}" || return
 }
 
@@ -2604,7 +2604,7 @@ save_gateways_state ()
         ;;
     esac
     is_dir "${GATEWAYS_STATE_FILE%/*}" ||
-    OUTPUT="$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}")" || {
+    OUTPUT=$(2>&1 mkdir -p "${GATEWAYS_STATE_FILE%/*}") || {
         say "error: $OUTPUT"
         return 1
     } >&2
@@ -2768,7 +2768,7 @@ fetch_gateways ()
     FETCH_TIMEOUT=1
     while is_diff $COUNT $RETRIES
     do
-        FETCHED_GATEWAYS="$($FETCH_GATEWAYS)" && {
+        FETCHED_GATEWAYS=$($FETCH_GATEWAYS) && {
             SUCCESS=0
             break
         } || COUNT=$((COUNT + 1))
