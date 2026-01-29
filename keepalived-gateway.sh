@@ -1309,7 +1309,6 @@ resolve_dependencies ()
                             }
                             return d
                         }
-
                         $4 ~ /^'"$STATE_FILTER"'$/ && $2 ~ /:[0-9A-F]+$/ {
                             sub(/^[^:]+:/, "", $2)
                             $1 = hex2dec($2)
@@ -1390,9 +1389,22 @@ resolve_dependencies ()
                             match_found = "no"
                             if (destination == $1) {
                                 match_found = "yes"
-                            } else if ((destination == "0.0.0.0" || destination == "::/0") && ($1 == "default")) {
+                            } else if (
+                                (
+                                    destination == "0.0.0.0" ||
+                                    destination == "::/0"
+                                ) && (
+                                    $1 == "default"
+                                )
+                            ) {
                                 match_found = "yes"
-                            } else if ((destination == "default") && ($1 == "0.0.0.0" || $1 == "::/0")) {
+                            } else if (
+                                (
+                                    destination == "default"
+                                ) && (
+                                    $1 == "0.0.0.0" || $1 == "::/0"
+                                )
+                            ) {
                                 match_found = "yes"
                             }
                             if (match_found != "yes")
@@ -1575,12 +1587,10 @@ optimize_gateways ()
             gateway = $2
             metric = ($3 == "" ? 0 : $3)
             key = interface "=" gateway
-
             if (!(key in best_metric) || metric < best_metric[key]) {
                 best_metric[key] = metric
                 pos[key] = $0
             }
-
             if (!(key in seen)) {
                 keys[++count] = key
                 seen[key] = 1
@@ -1594,12 +1604,10 @@ optimize_gateways ()
                     keys[j-1] = tmp
                 }
             }
-
             gateways = ""
             for (i = 1; i <= count; i++) {
                 gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
             }
-
             if (gateways != "") print gateways
         }
     ' <<EOF
