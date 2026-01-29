@@ -62,10 +62,10 @@ then
                                    print ${CONTINUE:+"$CONTINUE"}    -- "$*"
     }
 else
-    if type printf >/dev/null 2>&1
+    if type printf
     then
-        printf '%b' '\033[0m' >/dev/null 2>&1 && CAN_ESC_OCTAL="yes" ||
-                                                 CAN_ESC_OCTAL=""
+        printf '%b' '\033[0m' && CAN_ESC_OCTAL="yes" ||
+                                 CAN_ESC_OCTAL=""
         PUTS_TYPE="printf"
         puts ()
         {
@@ -74,7 +74,7 @@ else
             is_empty "${CONTINUE:-}" && printf "${FORMAT:-%s}\n" "$*" ||
                                         printf "${FORMAT:-%s}"   "$*"
         }
-    elif type echo >/dev/null 2>&1
+    elif type echo
     then
         is_equal "X`echo -n`" "X-n" && {
             is_equal "X`echo '\033[0m'`" "X\033[0m" && CAN_ESC_OCTAL="" ||
@@ -105,7 +105,7 @@ else
         }
     else
         exit 1
-    fi
+    fi >/dev/null 2>&1
 fi
 
 say ()
@@ -1458,9 +1458,9 @@ resolve_dependencies ()
         MISSING_DEPS=""
         for COMMAND in date wc
         do
-            type "$COMMAND" >/dev/null 2>&1 ||
+            type "$COMMAND" ||
                 MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
-        done
+        done >/dev/null 2>&1
         is_empty "${MISSING_DEPS:-}" ||
             say 127 "error: environment: speedtest is impossible: '$MISSING_DEPS' not found"
     }
@@ -1493,10 +1493,10 @@ resolve_ping ()
 
     if is_equal "$HAS_IPV4_STACK" yes
     then
-        ping -4 -c 1 -w 1 127.0.0.1 >/dev/null 2>&1 &&
+        ping -4 -c 1 -w 1 127.0.0.1 &&
             PING4="ping -4" ||
             PING4="ping"
-    fi
+    fi >/dev/null 2>&1
 
     if is_equal "$HAS_IPV6_STACK" yes
     then
@@ -1668,7 +1668,6 @@ verify_network_state ()
     done
     is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" ||
         say "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
-
 
     is_equal "$ROLE" "slave-passive" || {
         if resolve_ping
@@ -2637,7 +2636,7 @@ serve_netcat ()
 
     while :
     do
-        $SERVER <<EOF >/dev/null 2>&1 &
+        $SERVER <<EOF &
 HTTP/1.1 200 OK$CR
 Content-Type: text/plain$CR
 Content-Length: ${#DEFAULT_GATEWAYS}$CR
@@ -2646,8 +2645,8 @@ $CR
 $DEFAULT_GATEWAYS
 EOF
         NETCAT_PID=$!
-        wait $NETCAT_PID 2>/dev/null
-    done
+        wait $NETCAT_PID
+    done >/dev/null 2>&1
 }
 
 serve_httpd ()
@@ -2769,11 +2768,11 @@ fetch_gateways ()
     FETCH_TIMEOUT=1
     while is_diff $COUNT $RETRIES
     do
-        FETCHED_GATEWAYS="$(2>/dev/null $FETCH_GATEWAYS)" && {
+        FETCHED_GATEWAYS="$($FETCH_GATEWAYS)" && {
             SUCCESS=0
             break
         } || COUNT=$((COUNT + 1))
-    done
+    done 2>/dev/null
 
     is_equal $SUCCESS 0 && say -p " [ OK ]" || {
         say -p " [ ERROR ]"
