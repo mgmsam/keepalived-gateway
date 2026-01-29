@@ -1132,15 +1132,18 @@ resolve_dependencies ()
         control_route ()
         {
             set -- "route" "$@"
-            net_parser "$@"
+            net_parser "$@" || return 0
             shift $SHIFT
-            ip_family "route" "$COMMAND" "$DESTINATION" "$@"
+            ERROR=$(ip_family "route" "$COMMAND" "$DESTINATION" "$@" 2>&1) || {
+                say "$ERROR"
+                return "$RESULT"
+            }
         }
 
         show_routes ()
         {
             set -- "route" "show" "$@"
-            net_parser "$@"
+            net_parser "$@" || return 0
             shift $SHIFT
             ip_family "route" "show" ${DESTINATION:-} "$@" | awk '
                 BEGIN {
@@ -1167,7 +1170,7 @@ resolve_dependencies ()
         show_addresses ()
         {
             set -- "address" "show" "$@"
-            net_parser "$@"
+            net_parser "$@" || return 0
             shift $SHIFT
             ip_family "address" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
                 BEGIN {
@@ -1180,7 +1183,7 @@ resolve_dependencies ()
         show_interfaces ()
         {
             set -- "link" "show" "$@"
-            net_parser "$@"
+            net_parser "$@" || return 0
             shift $SHIFT
             ip_family "link" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
@@ -1197,7 +1200,7 @@ resolve_dependencies ()
         NET_TOOL="ifconfig"
         show_addresses ()
         {
-            net_parser "$@"
+            net_parser "$@" || return 0
             shift $SHIFT
             ifconfig -a ${NET_DEVICE:-${DESTINATION:-}} 2>/dev/null | awk '
                 BEGIN {
@@ -1209,7 +1212,7 @@ resolve_dependencies ()
 
         show_interfaces ()
         {
-            net_parser "$@"
+            net_parser "$@" || return 0
             shift $SHIFT
             ifconfig -a ${NET_DEVICE:-${DESTINATION:-}} 2>/dev/null | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
@@ -1374,7 +1377,7 @@ resolve_dependencies ()
 
             show_routes ()
             {
-                net_parser "$@"
+                net_parser "$@" || return 0
                 shift $SHIFT
                 netstat_family -rn | awk '
                     BEGIN {
@@ -1423,31 +1426,41 @@ resolve_dependencies ()
             is_equal $OSTYPE "linux-gnu" &&
             control_route ()
             {
-                net_parser "$@"
+                net_parser "$@" || return 0
                 shift "$SHIFT"
-                case "$COMMAND" in
-                    "replace")
-                        route del "$DESTINATION" 2>/dev/null || :
-                        route add "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
-                    ;;
-                    *)
-                        route "$COMMAND" "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
-                    ;;
-                esac
+                ERROR=$(
+                    case "$COMMAND" in
+                        "replace")
+                            route del "$DESTINATION" 2>/dev/null || :
+                            route add "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
+                        ;;
+                        *)
+                            route "$COMMAND" "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
+                        ;;
+                    esac 2>&1
+                ) || {
+                    say "$ERROR"
+                    return "$RESULT"
+                }
             } ||
             control_route ()
             {
-                net_parser "$@"
+                net_parser "$@" || return 0
                 shift "$SHIFT"
-                case "$COMMAND" in
-                    "replace")
-                        route del "$DESTINATION" 2>/dev/null || :
-                        route add "$DESTINATION" "$1"
-                    ;;
-                    *)
-                        route "$COMMAND" "$DESTINATION" "$1" ${2:-}
-                    ;;
-                esac
+                ERROR=$(
+                    case "$COMMAND" in
+                        "replace")
+                            route del "$DESTINATION" 2>/dev/null || :
+                            route add "$DESTINATION" "$1"
+                        ;;
+                        *)
+                            route "$COMMAND" "$DESTINATION" "$1" ${2:-}
+                        ;;
+                    esac
+                ) || {
+                    say "$ERROR"
+                    return "$RESULT"
+                }
             }
         else
             say 127 "error: environment: route management impossible: 'route' not found"
@@ -2248,14 +2261,14 @@ check_gateways ()
         }
         if is_equal "$DO_PING" "yes"
         then
-            control_route "$FAMILY" replace $PING_ROUTE >/dev/null 2>&1
+            control_route "$FAMILY" replace $PING_ROUTE || return
             check_ping -I "$INTERFACE" "$PING_IP" || {
-                control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
+                control_route "$FAMILY" del $PING_ROUTE || return
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
                 collect_dead_route
                 continue
             }
-            control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
+            control_route "$FAMILY" del $PING_ROUTE || return
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
@@ -2384,7 +2397,8 @@ bit2Human ()
 evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
-    control_route "$FAMILY" replace $SPEEDTEST_ROUTE >/dev/null 2>&1
+
+    control_route "$FAMILY" replace $SPEEDTEST_ROUTE || return
     if speedtest
     then
         test "$BEST_SPEED" -ge "$BIT" || {
@@ -2392,10 +2406,10 @@ evaluate_speed ()
             BEST_ROUTE="$ROUTE"
             BEST_SPEED="$BIT"
         }
-        control_route "$FAMILY" del $SPEEDTEST_ROUTE >/dev/null 2>&1
+        control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
         say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
     else
-        control_route "$FAMILY" del $SPEEDTEST_ROUTE >/dev/null 2>&1
+        control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
         say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
         return 1
     fi
@@ -2404,14 +2418,14 @@ evaluate_speed ()
 evaluate_host ()
 {
     say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
-    control_route "$FAMILY" replace $PING_ROUTE >/dev/null 2>&1
+    control_route "$FAMILY" replace $PING_ROUTE || return
     check_ping -I "$INTERFACE" "$PING_IP" && {
-        control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
+        control_route "$FAMILY" del $PING_ROUTE || return
         say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
     } || {
-        control_route "$FAMILY" del $PING_ROUTE >/dev/null 2>&1
+        control_route "$FAMILY" del $PING_ROUTE || return
         say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
             say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
