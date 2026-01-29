@@ -284,7 +284,7 @@ is_metric ()
         *)
     esac
 
-    METRIC="${1#"${1%%[!0]*}"}"
+    METRIC="${1#${1%%[!0]*}}"
 
     test ${#METRIC} -ge 10 || return 0
     test ${#METRIC} -le 10 && test "$METRIC" \< 4294967296 || {
@@ -542,11 +542,11 @@ format_duration ()
 
     TIMESTRING=""
     test "$D" -gt 0 && TIMESTRING="${D}d" || :
-    test "$H" -gt 0 && TIMESTRING="${TIMESTRING:+"$TIMESTRING, "}${H}h" || :
-    test "$M" -gt 0 && TIMESTRING="${TIMESTRING:+"$TIMESTRING, "}${M}m" || :
+    test "$H" -gt 0 && TIMESTRING="${TIMESTRING:+$TIMESTRING, }${H}h" || :
+    test "$M" -gt 0 && TIMESTRING="${TIMESTRING:+$TIMESTRING, }${M}m" || :
     test "$S" -gt 0 ||
         is_empty "${TIMESTRING:-}" &&
-        TIMESTRING="${TIMESTRING:+"$TIMESTRING, "}${S}s"
+        TIMESTRING="${TIMESTRING:+$TIMESTRING, }${S}s"
 
     puts "$TIMESTRING"
 }
@@ -599,7 +599,7 @@ parse_resource ()
                 return 1
             }
             HOST="${HOST#*://}"
-            HOST="${HOST#"${HOST%%[!/]*}"}"
+            HOST="${HOST#${HOST%%[!/]*}}"
         ;;
     esac
     case "$HOST" in
@@ -611,7 +611,7 @@ parse_resource ()
         */*)
             AUTHORITY="${HOST%%/*}"
             RESOURCE="${HOST#*/}"
-            is_not_empty "${SCHEME:-"${WWW:-}"}" ||
+            is_not_empty "${SCHEME:-${WWW:-}}" ||
             case "$RESOURCE" in
                 [0-9] | [0-9][0-9] | 1[0-2][0-8])
                     MASK="$RESOURCE"
@@ -872,7 +872,7 @@ verify_config_syntax ()
         is_empty "${SCHEME:-}${USER_INFO:-}${FQDN:-}${PORT:-}${RESOURCE:-}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': only plain IPv4/IPv6 [with CIDR] allowed"
 
-        is_not_empty "${IPV4:-"${IPV6:-}"}" ||
+        is_not_empty "${IPV4:-${IPV6:-}}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address"
 
         VIP_FAMILY="${FAMILY:-}"
@@ -2114,7 +2114,7 @@ remove_test_route ()
     do
         ROUTE="$(show_routes -4 "$IP")"
         is_empty "${ROUTE:-}" ||
-            REMOVE_ROUTES="${REMOVE_ROUTES:+"$REMOVE_ROUTES$LF"}$ROUTE"
+            REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
     done
 
     is_empty "${REMOVE_ROUTES:-}" || {
@@ -2126,7 +2126,7 @@ remove_test_route ()
     do
         ROUTE="$(show_routes -6 "$IP")"
         is_empty "${ROUTE:-}" ||
-            REMOVE_ROUTES="${REMOVE_ROUTES:+"$REMOVE_ROUTES$LF"}$ROUTE"
+            REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
     done
 
     is_empty "${REMOVE_ROUTES:-}" || {
@@ -2173,7 +2173,7 @@ EOF
     esac
 
     is_equal "$NET_TOOL" "ip" && {
-        ROUTE="default via $GATEWAY_IP dev $INTERFACE${METRIC:+" metric $METRIC"}"
+        ROUTE="default via $GATEWAY_IP dev $INTERFACE${METRIC:+ metric $METRIC}"
         SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY_IP dev $INTERFACE"
         PING_ROUTE="${PING_IP:-} via $GATEWAY_IP dev $INTERFACE"
     } || {
@@ -2187,10 +2187,10 @@ collect_dead_route ()
 {
     case "$FAMILY" in
         -4)
-            DEAD_ROUTES_IPV4="${DEAD_ROUTES_IPV4:+"$DEAD_ROUTES_IPV4$LF"}$ROUTE"
+            DEAD_ROUTES_IPV4="${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE"
         ;;
         -6)
-            DEAD_ROUTES_IPV6="${DEAD_ROUTES_IPV6:+"$DEAD_ROUTES_IPV6$LF"}$ROUTE"
+            DEAD_ROUTES_IPV6="${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE"
         ;;
     esac
 }
@@ -2205,15 +2205,15 @@ collect_alive_route ()
     case "$FAMILY" in
         -4)
             ALIVE_COUNT_IPV4="$((ALIVE_COUNT_IPV4 + 1))"
-            ALIVE_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:+"$ALIVE_GATEWAYS_IPV4 "}$GATEWAY"
-            ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+"$ALIVE_METRICS_IPV4 "}${METRIC:-0}"
-            ALIVE_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:+"$ALIVE_ROUTES_IPV4$LF"}$ROUTE"
+            ALIVE_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:+$ALIVE_GATEWAYS_IPV4 }$GATEWAY"
+            ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+$ALIVE_METRICS_IPV4 }${METRIC:-0}"
+            ALIVE_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:+$ALIVE_ROUTES_IPV4$LF}$ROUTE"
         ;;
         -6)
             ALIVE_COUNT_IPV6="$((ALIVE_COUNT_IPV6 + 1))"
-            ALIVE_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:+"$ALIVE_GATEWAYS_IPV6 "}$GATEWAY"
-            ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+"$ALIVE_METRICS_IPV6 "}${METRIC:-0}"
-            ALIVE_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:+"$ALIVE_ROUTES_IPV6$LF"}$ROUTE"
+            ALIVE_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:+$ALIVE_GATEWAYS_IPV6 }$GATEWAY"
+            ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+$ALIVE_METRICS_IPV6 }${METRIC:-0}"
+            ALIVE_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:+$ALIVE_ROUTES_IPV6$LF}$ROUTE"
         ;;
     esac
 }
@@ -2284,10 +2284,10 @@ collect_gateway ()
 {
     case "$FAMILY" in
         -4)
-            DEFAULT_GATEWAYS_IPV4="${DEFAULT_GATEWAYS_IPV4:+"$DEFAULT_GATEWAYS_IPV4 "}$BEST_GATEWAY"
+            DEFAULT_GATEWAYS_IPV4="${DEFAULT_GATEWAYS_IPV4:+$DEFAULT_GATEWAYS_IPV4 }$BEST_GATEWAY"
         ;;
         -6)
-            DEFAULT_GATEWAYS_IPV6="${DEFAULT_GATEWAYS_IPV6:+"$DEFAULT_GATEWAYS_IPV6 "}$BEST_GATEWAY"
+            DEFAULT_GATEWAYS_IPV6="${DEFAULT_GATEWAYS_IPV6:+$DEFAULT_GATEWAYS_IPV6 }$BEST_GATEWAY"
         ;;
     esac
     BEST_GATEWAY=""
@@ -2297,10 +2297,10 @@ collect_route ()
 {
     case "$FAMILY" in
         -4)
-            DEFAULT_ROUTES_IPV4="${DEFAULT_ROUTES_IPV4:+"$DEFAULT_ROUTES_IPV4$LF"}$BEST_ROUTE"
+            DEFAULT_ROUTES_IPV4="${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE"
         ;;
         -6)
-            DEFAULT_ROUTES_IPV6="${DEFAULT_ROUTES_IPV6:+"$DEFAULT_ROUTES_IPV6$LF"}$BEST_ROUTE"
+            DEFAULT_ROUTES_IPV6="${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE"
         ;;
     esac
     BEST_ROUTE=""
@@ -2454,7 +2454,7 @@ get_current_routes ()
             while read ROUTE
             do
                 ROUTE=$(puts $ROUTE)
-                CURRENT_ROUTES="${CURRENT_ROUTES:+"$CURRENT_ROUTES$LF"}$ROUTE"
+                CURRENT_ROUTES="${CURRENT_ROUTES:+$CURRENT_ROUTES$LF}$ROUTE"
             done <<EOF
 $ROUTES
 EOF
