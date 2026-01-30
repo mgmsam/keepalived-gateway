@@ -808,6 +808,14 @@ verify_config_syntax ()
         ;;
     esac
 
+    case "${METRIC_FLAG:-}" in
+        "" | metric | -metric | -priority | -weight)
+        ;;
+        *)
+            say 2 "error: variable 'METRIC_FLAG': unsupported flag"
+        ;;
+    esac
+
     parse_interval "${CHECK_INTERVAL:=30}" && {
         CHECK_INTERVAL="$INTERVAL"
         HUMAN_INTERVAL=$(format_duration "$CHECK_INTERVAL")
@@ -1109,7 +1117,7 @@ resolve_dependencies ()
             fi
         done >/dev/null 2>&1
 
-        ip_family ()
+        run_ip ()
         {
             case "${FAMILY:-}" in
                 -4)
@@ -1134,7 +1142,7 @@ resolve_dependencies ()
             set -- "route" "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            ERROR=$(ip_family "route" "$COMMAND" "$DESTINATION" "$@" 2>&1) || {
+            ERROR=$(run_ip "route" "$COMMAND" "$DESTINATION" "$@" 2>&1) || {
                 say "$ERROR"
                 return "$RESULT"
             }
@@ -1145,7 +1153,7 @@ resolve_dependencies ()
             set -- "route" "show" "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            ip_family "route" "show" ${DESTINATION:-} "$@" | awk '
+            run_ip "route" "show" ${DESTINATION:-} "$@" | awk '
                 BEGIN {
                     interface = "'"${NET_DEVICE:-}"'"
                 }
@@ -1172,7 +1180,7 @@ resolve_dependencies ()
             set -- "address" "show" "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            ip_family "address" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
+            run_ip "address" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
                 BEGIN {
                     family = "'"${FAMILY#-}"'"
                 }
@@ -1185,7 +1193,7 @@ resolve_dependencies ()
             set -- "link" "show" "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            ip_family "link" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
+            run_ip "link" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
                 /^[0-9]+:/ {
                     value = $2
@@ -1355,7 +1363,7 @@ resolve_dependencies ()
                 fi
             done >/dev/null 2>&1
 
-            netstat_family ()
+            run_netstat ()
             {
                 case "${FAMILY:-}" in
                     -4)
@@ -1379,7 +1387,7 @@ resolve_dependencies ()
             {
                 net_parser "$@" || return 0
                 shift $SHIFT
-                netstat_family -rn | awk '
+                run_netstat -rn | awk '
                     BEGIN {
                         interface = "'"${NET_DEVICE:-}"'"
                         destination = "'"${DESTINATION:-}"'"
@@ -1421,50 +1429,8 @@ resolve_dependencies ()
             say 127 "error: environment: routing table check impossible: 'netstat' not found"
         fi
 
-        if type route >/dev/null 2>&1
-        then
-            is_equal $OSTYPE "linux-gnu" &&
-            control_route ()
-            {
-                net_parser "$@" || return 0
-                shift "$SHIFT"
-                ERROR=$(
-                    case "$COMMAND" in
-                        replace)
-                            route del "$DESTINATION" 2>/dev/null || :
-                            route add "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
-                        ;;
-                        *)
-                            route "$COMMAND" "$DESTINATION" ${1:+gw $1} ${2:+dev $2} ${3:+metric $3}
-                        ;;
-                    esac 2>&1
-                ) || {
-                    say "$ERROR"
-                    return "$RESULT"
-                }
-            } ||
-            control_route ()
-            {
-                net_parser "$@" || return 0
-                shift "$SHIFT"
-                ERROR=$(
-                    case "$COMMAND" in
-                        replace)
-                            route del "$DESTINATION" 2>/dev/null || :
-                            route add "$DESTINATION" "$1"
-                        ;;
-                        *)
-                            route "$COMMAND" "$DESTINATION" "$1" ${2:-}
-                        ;;
-                    esac
-                ) || {
-                    say "$ERROR"
-                    return "$RESULT"
-                }
-            }
-        else
+        type route >/dev/null 2>&1 ||
             say 127 "error: environment: route management impossible: 'route' not found"
-        fi
     fi
 
     is_equal "$DO_SPEEDTEST" "no" || {
@@ -1497,6 +1463,127 @@ resolve_dependencies ()
             say 127 "error: environment: gateway check impossible: 'ping' not found"
 
     return "$EXIT_CODE"
+}
+
+resolve_route ()
+{
+    # (RFC 5737 / RFC 3849)
+    TEST_IP4="192.0.2.255"
+    TEST_IP6="2001:db8::255"
+
+    LOCAL_IP4="127.0.0.1"
+    LOCAL_IP6="::1"
+
+    ROUTE=""
+    ROUTE4="route"
+    ROUTE6=""
+    IGNOREMETRIC="no"
+
+    is_not_empty "${METRIC_FLAG:-}" || {
+
+        if is_equal "$HAS_IPV4_STACK" "yes"
+        then
+            for i in -4 "-f inet4" "-inet4" "-A inet4"
+            do
+                if route $i add "$TEST_IP4" "$LOCAL_IP4"
+                then
+                    route $i delete "$TEST_IP4" "$LOCAL_IP4"
+                    ROUTE4="route $i"
+                    break
+                fi
+            done
+        fi
+
+        if is_equal "$HAS_IPV6_STACK" "yes"
+        then
+            for i in -6 "-f inet6" "-inet6" "-A inet6"
+            do
+                if route $i add "$TEST_IP6" "$LOCAL_IP6"
+                then
+                    route $i delete "$TEST_IP6" "$LOCAL_IP6"
+                    ROUTE6="route $i"
+                    break
+                fi
+            done
+        fi
+
+        is_equal "$HAS_IPV4_STACK" "yes" && {
+            ROUTE="$ROUTE4"
+            DESTINATION="$TEST_IP4"
+            LOCAL_IP="$LOCAL_IP4"
+        } || {
+            is_equal "$HAS_IPV6_STACK" "yes" && {
+                ROUTE="$ROUTE6"
+                DESTINATION="$TEST_IP6"
+                LOCAL_IP="$LOCAL_IP6"
+            } || return
+        }
+
+        for METRIC_FLAG in metric -metric -priority -weight
+        do
+            $ROUTE add "$DESTINATION" "$LOCAL_IP" "$METRIC_FLAG" 15 &&
+                break || METRIC_FLAG=""
+        done
+
+        is_not_empty "${METRIC_FLAG:-}" || {
+            $ROUTE add "$DESTINATION" "$LOCAL_IP" 15 || {
+                $ROUTE add "$DESTINATION" "$LOCAL_IP" || return
+                IGNOREMETRIC="yes"
+            }
+        }
+
+        $ROUTE delete "$DESTINATION" "$LOCAL_IP"
+
+    } >/dev/null 2>&1
+
+    case "${METRIC_FLAG:-}" in
+        "" | -metric | -priority | -weight)
+            run_route ()
+            {
+                case "${FAMILY:-}" in
+                    -4)
+                        $ROUTE4 "$1" "$2" ${3:-} ${4:+${METRIC_FLAG:-} "$4"}
+                    ;;
+                    -6)
+                        $ROUTE6 "$1" "$2" ${3:-} ${4:+${METRIC_FLAG:-} "$4"}
+                    ;;
+                esac
+            }
+        ;;
+        metric)
+            run_route ()
+            {
+                case "${FAMILY:-}" in
+                    -4)
+                        $ROUTE4 "$1" "$2" ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
+                    ;;
+                    -6)
+                        $ROUTE6 "$1" "$2" ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
+                    ;;
+                esac
+            }
+        ;;
+    esac
+
+    control_route ()
+    {
+        net_parser "$@" || return 0
+        shift "$SHIFT"
+        ERROR=$(
+            case "$COMMAND" in
+                replace)
+                    run_route del "$DESTINATION" 2>/dev/null || :
+                    run_route add "$DESTINATION" "$@"
+                ;;
+                *)
+                    run_route "$COMMAND" "$DESTINATION" "$@"
+                ;;
+            esac 2>&1
+        ) || {
+            say "$ERROR"
+            return "$RESULT"
+        }
+    }
 }
 
 resolve_ping ()
@@ -1681,6 +1768,9 @@ verify_network_state ()
     done
     is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" ||
         say "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
+
+    is_equal "$NET_TOOL" ip || resolve_route ||
+        say "error: environment: 'route' is unusable: network stack support check failed"
 
     is_equal "$ROLE" "slave-passive" || {
         if resolve_ping
