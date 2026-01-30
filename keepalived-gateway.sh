@@ -386,28 +386,28 @@ parse_gateway_entry ()
     case "${1:-}" in
         *[.:]*)
             INTERFACE=
-            GATEWAY="$1"
+            GATEWAY_IP="$1"
             METRIC="${2:-}"
         ;;
         *)
             INTERFACE="${1:-}"
-            GATEWAY="${2:-}"
+            GATEWAY_IP="${2:-}"
             METRIC="${3:-}"
         ;;
     esac
 
-    case "$GATEWAY" in
+    case "$GATEWAY_IP" in
         "")
             say 2 "error: variable 'GATEWAYS': gateway [$NUM]: gateway is empty"
         ;;
         *.*)
-            is_ipv4 "$GATEWAY" && FAMILY="-4" ||
+            is_ipv4 "$GATEWAY_IP" && FAMILY="-4" ||
                 say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
         ;;
         *)
-            GATEWAY="${GATEWAY#[}"
-            GATEWAY="${GATEWAY%]}"
-            is_ipv6 "$GATEWAY" && FAMILY="-6" ||
+            GATEWAY_IP="${GATEWAY_IP#[}"
+            GATEWAY_IP="${GATEWAY_IP%]}"
+            is_ipv6 "$GATEWAY_IP" && FAMILY="-6" ||
                 say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
         ;;
     esac
@@ -431,12 +431,12 @@ parse_gateway_entry ()
 
 collect_gateway_ipv4 ()
 {
-    GATEWAYS_IPV4="${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}$INTERFACE=$GATEWAY${METRIC:+=$METRIC}"
+    GATEWAYS_IPV4="${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}$INTERFACE=$GATEWAY_IP${METRIC:+=$METRIC}"
 }
 
 collect_gateway_ipv6 ()
 {
-    GATEWAYS_IPV6="${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}$INTERFACE=$GATEWAY${METRIC:+=$METRIC}"
+    GATEWAYS_IPV6="${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}$INTERFACE=$GATEWAY_IP${METRIC:+=$METRIC}"
 }
 
 collect_metrics_ipv4 ()
@@ -1733,16 +1733,16 @@ verify_gateway_remote ()
 
     case "${1:-}" in
         *[.:]*)
-            GATEWAY="$1"
+            GATEWAY_IP="$1"
         ;;
         *)
-            GATEWAY="$2"
+            GATEWAY_IP="$2"
         ;;
     esac
 
-    if is_local_ip "$GATEWAY"
+    if is_local_ip "$GATEWAY_IP"
     then
-        ERROR="address is assigned to this host (loopback risk): $GATEWAY"
+        ERROR="address is assigned to this host (loopback risk): $GATEWAY_IP"
         return 2
     fi
 }
