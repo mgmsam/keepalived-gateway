@@ -228,6 +228,7 @@ setup_defaults ()
     DEFAULT_ROLE="single"
     DO_PING="no"
     DO_SPEEDTEST="no"
+    IGNOREMETRIC="no"
 }
 
 include_config ()
@@ -1477,7 +1478,6 @@ resolve_route ()
     ROUTE=""
     ROUTE4="route"
     ROUTE6=""
-    IGNOREMETRIC="no"
 
     is_not_empty "${METRIC_FLAG:-}" || {
 
@@ -2254,13 +2254,18 @@ loop ()
     :
 }
 
-format_route ()
+split_gateway ()
 {
     IFS="="
     read INTERFACE GATEWAY_IP METRIC <<EOF
-$GATEWAY
+$1
 EOF
     IFS="$POSIX_IFS"
+}
+
+format_route ()
+{
+    split_gateway "$GATEWAY"
 
     case "$GATEWAY_IP" in
         *:*)
@@ -2903,6 +2908,19 @@ fetch_gateways ()
     say "received remote state from master ($VIP):"
     say "  IPv4 [${FETCHED_GATEWAYS_IPV4:-no alive gateways provided}]"
     say "  IPv6 [${FETCHED_GATEWAYS_IPV6:-no alive gateways provided}]"
+
+    is_equal "$IGNOREMETRIC" no || {
+        FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS_IPV4%%$SPACE*}"
+        FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS_IPV6%%$SPACE*}"
+
+        split_gateway "$FETCHED_GATEWAYS_IPV4"
+        FETCHED_GATEWAYS_IPV4="${GATEWAY_IP:+$INTERFACE=$GATEWAY_IP}"
+
+        split_gateway "$FETCHED_GATEWAYS_IPV6"
+        FETCHED_GATEWAYS_IPV6="${GATEWAY_IP:+$INTERFACE=$GATEWAY_IP}"
+
+        FETCHED_GATEWAYS="${FETCHED_GATEWAYS_IPV4:--}$LF${FETCHED_GATEWAYS_IPV6:--}"
+    }
 
     is_not_empty "${FETCHED_GATEWAYS_IPV4:-}${FETCHED_GATEWAYS_IPV6:-}" ||
         FETCHED_GATEWAYS=""
