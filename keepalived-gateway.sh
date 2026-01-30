@@ -1850,7 +1850,8 @@ is_port_free ()
             exit
         }
         END {
-            if (found == "yes") exit 1
+            if (found == "yes")
+                exit 1
             exit 0
         }
     '
@@ -2282,6 +2283,21 @@ format_route ()
     }
 }
 
+is_local_interface ()
+{
+    show_interfaces | awk '
+        $1 ~ /^'"$1"'$/ {
+            found = "yes"
+            exit
+        }
+        END {
+            if (found == "yes")
+                exit 0
+            exit 1
+        }
+    '
+}
+
 collect_dead_route ()
 {
     case "$FAMILY" in
@@ -2341,15 +2357,15 @@ check_gateways ()
         format_route
         puts
         say "checking active IPv${FAMILY#-} route: '$ROUTE'"
-        is_interface "$INTERFACE" || {
-            say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
+        is_local_interface "$LOCAL_INTERFACE" || {
+            say "interface '$LOCAL_INTERFACE' is not available for gateway '$GATEWAY_IP'"
             collect_dead_route
             continue
         }
         if is_equal "$DO_PING" "yes"
         then
             control_route "$FAMILY" replace $PING_ROUTE || return
-            check_ping -I "$INTERFACE" "$PING_IP" || {
+            check_ping -I "$LOCAL_INTERFACE" "$PING_IP" || {
                 control_route "$FAMILY" del $PING_ROUTE || return
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
                 collect_dead_route
@@ -2357,7 +2373,7 @@ check_gateways ()
             }
             control_route "$FAMILY" del $PING_ROUTE || return
         else
-            check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
+            check_ping -I "$LOCAL_INTERFACE" "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
                 collect_dead_route
                 continue
@@ -2506,7 +2522,7 @@ evaluate_host ()
 {
     say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
     control_route "$FAMILY" replace $PING_ROUTE || return
-    check_ping -I "$INTERFACE" "$PING_IP" && {
+    check_ping -I "$LOCAL_INTERFACE" "$PING_IP" && {
         control_route "$FAMILY" del $PING_ROUTE || return
         say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         BEST_GATEWAY="$GATEWAY"
@@ -2514,7 +2530,7 @@ evaluate_host ()
     } || {
         control_route "$FAMILY" del $PING_ROUTE || return
         say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
-        check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
+        check_ping -I "$LOCAL_INTERFACE" "$GATEWAY_IP" &&
             say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}" ||
             say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
     }
@@ -2523,7 +2539,7 @@ evaluate_host ()
 evaluate_gateway ()
 {
     say "probing gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-    check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
+    check_ping -I "$LOCAL_INTERFACE" "$GATEWAY_IP" && {
         say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
@@ -2653,7 +2669,7 @@ reconcile_gateways ()
                 CURRENT_METRIC="${METRIC:-0}"
             }
 
-            is_interface "$LOCAL_INTERFACE" || {
+            is_local_interface "$LOCAL_INTERFACE" || {
                 say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
                 continue
             }
@@ -2933,7 +2949,7 @@ sync_gateways ()
     do
         format_route
         say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
-        is_interface "$LOCAL_INTERFACE" || {
+        is_local_interface "$LOCAL_INTERFACE" || {
             say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
             continue
         }
