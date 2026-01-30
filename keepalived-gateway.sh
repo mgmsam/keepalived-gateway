@@ -248,25 +248,24 @@ include_config ()
 is_interface ()
 {
     case "${1:-}" in
-        "")
-            ERROR="is empty"
-            return 1
+        '')
+            return 0
         ;;
         *[!0-9a-zA-Z:._-]*)
             ERROR="contains invalid characters"
-            return 2
+            return 1
         ;;
         *:*)
             ERROR="aliases are not supported, use physical device name"
-            return 3
+            return 2
         ;;
         .*)
             ERROR="name cannot start with a dot"
-            return 4
+            return 3
         ;;
         ????????????????*)
             ERROR="name too long (max 15)"
-            return 5
+            return 4
         ;;
     esac
 }
@@ -274,15 +273,13 @@ is_interface ()
 is_metric ()
 {
     case "${1:-}" in
-        "")
-            ERROR="is empty"
-            return 1
+        '')
+            return 0
         ;;
         *[!0123456789]*)
             ERROR="is not a valid number"
-            return 2
+            return 1
         ;;
-        *)
     esac
 
     METRIC="${1#${1%%[!0]*}}"
@@ -377,24 +374,26 @@ is_ipv6 ()
     done
 }
 
-parse_gateway_entry ()
+split_gateway ()
 {
     IFS="@#="
-    set -- $GATEWAY
+    read INTERFACE GATEWAY_IP METRIC <<EOF
+$1
+EOF
     IFS="$POSIX_IFS"
 
-    case "${1:-}" in
+    case "${INTERFACE:-}" in
         *[.:]*)
+            METRIC="$GATEWAY_IP"
+            GATEWAY_IP="$INTERFACE"
             INTERFACE=
-            GATEWAY_IP="$1"
-            METRIC="${2:-}"
-        ;;
-        *)
-            INTERFACE="${1:-}"
-            GATEWAY_IP="${2:-}"
-            METRIC="${3:-}"
         ;;
     esac
+}
+
+parse_gateway_entry ()
+{
+    split_gateway "$GATEWAY"
 
     case "$GATEWAY_IP" in
         "")
@@ -412,31 +411,23 @@ parse_gateway_entry ()
         ;;
     esac
 
-    is_empty "${INTERFACE:-}" && {
-        is_not_empty "${DEFAULT_INTERFACE:-}" &&
-        INTERFACE="$DEFAULT_INTERFACE" ||
-            say 2 "error: variable 'GATEWAYS': gateway [$NUM]: missing interface for gateway"
-    } || {
-        is_interface "$INTERFACE" ||
-            say 2 "error: variable 'GATEWAYS': gateway [$NUM]: interface $ERROR"
-    }
+    is_interface "$INTERFACE" ||
+        say 2 "error: variable 'GATEWAYS': gateway [$NUM]: interface $ERROR"
 
-    is_empty "${METRIC:-}" && {
-        is_empty "${DEFAULT_METRIC:-}" || METRIC="$DEFAULT_METRIC"
-    } || {
-        is_metric "$METRIC" && METRIC="${METRIC#${METRIC%%[!0]*}}" ||
+    is_empty "$METRIC" || {
+        is_metric "$METRIC" ||
             say 2 "error: variable 'GATEWAYS': gateway [$NUM]: route metric $ERROR"
     }
 }
 
 collect_gateway_ipv4 ()
 {
-    GATEWAYS_IPV4="${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}$INTERFACE=$GATEWAY_IP${METRIC:+=$METRIC}"
+    GATEWAYS_IPV4="${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}"
 }
 
 collect_gateway_ipv6 ()
 {
-    GATEWAYS_IPV6="${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}$INTERFACE=$GATEWAY_IP${METRIC:+=$METRIC}"
+    GATEWAYS_IPV6="${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}"
 }
 
 collect_metrics_ipv4 ()
@@ -785,13 +776,14 @@ verify_config_syntax ()
     esac
 
     is_empty "${INTERFACE:-}" || {
-        DEFAULT_INTERFACE="$INTERFACE"
-        is_interface "$INTERFACE" ||
+        is_interface "$INTERFACE"  && DEFAULT_INTERFACE="$INTERFACE" ||
             say 2 "error: variable 'INTERFACE': $ERROR"
     }
 
-    is_metric "${METRIC:-0}" && DEFAULT_METRIC="${METRIC:-}" ||
-        say 2 "error: variable 'METRIC': route metric $ERROR"
+    is_empty "${METRIC:-}" || {
+        is_metric "$METRIC" && DEFAULT_METRIC="$METRIC" ||
+            say 2 "error: variable 'METRIC': route metric $ERROR"
+    }
 
     is_empty "${GATEWAYS:-}" && {
         is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" ||
@@ -1569,6 +1561,7 @@ resolve_route ()
     {
         net_parser "$@" || return 0
         shift "$SHIFT"
+        eval set -- "$@"
         ERROR=$(
             case "$COMMAND" in
                 replace)
@@ -2254,15 +2247,6 @@ loop ()
     :
 }
 
-split_gateway ()
-{
-    IFS="="
-    read INTERFACE GATEWAY_IP METRIC <<EOF
-$1
-EOF
-    IFS="$POSIX_IFS"
-}
-
 format_route ()
 {
     split_gateway "$GATEWAY"
@@ -2284,14 +2268,17 @@ format_route ()
         ;;
     esac
 
+    LOCAL_INTERFACE="${INTERFACE:-$DEFAULT_INTERFACE}"
+    LOCAL_METRIC="${METRIC:-$DEFAULT_METRIC}"
+
     is_equal "$NET_TOOL" "ip" && {
-        ROUTE="default via $GATEWAY_IP dev $INTERFACE${METRIC:+ metric $METRIC}"
-        SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} via $GATEWAY_IP dev $INTERFACE"
-        PING_ROUTE="${PING_IP:-} via $GATEWAY_IP dev $INTERFACE"
+        ROUTE="default via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}${LOCAL_METRIC:+ metric $LOCAL_METRIC}"
+        SPEEDTEST_ROUTE="$SPEEDTEST_IP via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}"
+        PING_ROUTE="$PING_IP via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}"
     } || {
-        ROUTE="default $GATEWAY_IP $INTERFACE ${METRIC:-}"
-        SPEEDTEST_ROUTE="${SPEEDTEST_IP:-} $GATEWAY_IP $INTERFACE"
-        PING_ROUTE="${PING_IP:-} $GATEWAY_IP $INTERFACE"
+        ROUTE="default $GATEWAY_IP '$LOCAL_INTERFACE' '$LOCAL_METRIC'"
+        SPEEDTEST_ROUTE="$SPEEDTEST_IP $GATEWAY_IP $LOCAL_INTERFACE"
+        PING_ROUTE="$PING_IP $GATEWAY_IP $LOCAL_INTERFACE"
     }
 }
 
@@ -2371,7 +2358,7 @@ check_gateways ()
             control_route "$FAMILY" del $PING_ROUTE || return
         else
             check_ping -I "$INTERFACE" "$GATEWAY_IP" || {
-                say "gateway '$GATEWAY_IP' is unreachable on interface '$INTERFACE'"
+                say "gateway '$GATEWAY_IP' is unreachable${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
                 collect_dead_route
                 continue
             }
@@ -2507,7 +2494,7 @@ evaluate_speed ()
             BEST_SPEED="$BIT"
         }
         control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
-        say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP' on '$INTERFACE'"
+        say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
     else
         control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
         say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
@@ -2528,19 +2515,19 @@ evaluate_host ()
         control_route "$FAMILY" del $PING_ROUTE || return
         say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
         check_ping -I "$INTERFACE" "$GATEWAY_IP" &&
-            say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'" ||
-            say "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+            say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}" ||
+            say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
     }
 }
 
 evaluate_gateway ()
 {
-    say "probing gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+    say "probing gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
     check_ping -I "$INTERFACE" "$GATEWAY_IP" && {
-        say "reachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+        say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
-    } || say "unreachable gateway address: '$GATEWAY_IP' on '$INTERFACE'"
+    } || say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
 }
 
 add_routes ()
@@ -2649,7 +2636,7 @@ reconcile_gateways ()
         do
             format_route
             puts
-            say "testing IPv${FAMILY#-} gateway '$GATEWAY_IP' dev '$INTERFACE'${METRIC:+ with metric $METRIC}"
+            say "testing IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
 
             is_equal "${CURRENT_FAMILY:-}" "$FAMILY" &&
             is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
@@ -2666,8 +2653,8 @@ reconcile_gateways ()
                 CURRENT_METRIC="${METRIC:-0}"
             }
 
-            is_interface "$INTERFACE" || {
-                say "interface not found or down: '$INTERFACE'"
+            is_interface "$LOCAL_INTERFACE" || {
+                say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
                 continue
             }
 
@@ -2945,9 +2932,9 @@ sync_gateways ()
     for GATEWAY in ${FETCHED_GATEWAYS_IPV4:-} ${FETCHED_GATEWAYS_IPV6:-}
     do
         format_route
-        say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP' dev '$INTERFACE'${METRIC:+ with metric $METRIC}"
-        is_interface "$INTERFACE" || {
-            say "interface '$INTERFACE' is not available for gateway '$GATEWAY_IP'"
+        say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
+        is_interface "$LOCAL_INTERFACE" || {
+            say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
             continue
         }
         BEST_GATEWAY="$GATEWAY"
