@@ -226,6 +226,8 @@ setup_core_env ()
 setup_defaults ()
 {
     DEFAULT_ROLE="single"
+    DEFAULT_INTERFACE=
+    DEFAULT_METRIC=
     DO_PING="no"
     DO_SPEEDTEST="no"
     IGNOREMETRIC="no"
@@ -1025,8 +1027,9 @@ resolve_dependencies ()
         FAMILY=""
         OBJECT=""
         COMMAND=""
-        NET_DEVICE=""
         DESTINATION=""
+        GATEWAY_IP=""
+        NET_DEVICE=""
         SHIFT="0"
 
         while is_diff $# 0
@@ -1037,6 +1040,11 @@ resolve_dependencies ()
                 ;;
                 -d)
                     DESTINATION="$2"
+                    SHIFT=$((SHIFT + 1))
+                    shift
+                ;;
+                -g)
+                    GATEWAY_IP="$2"
                     SHIFT=$((SHIFT + 1))
                     shift
                 ;;
@@ -1061,7 +1069,7 @@ resolve_dependencies ()
             shift
         done
 
-        case "${DESTINATION:-}" in
+        case "${DESTINATION:-$GATEWAY_IP}" in
             *:*:*)
                 case "${FAMILY:-}" in
                     "" | *6*)
@@ -1130,17 +1138,6 @@ resolve_dependencies ()
             esac
         }
 
-        control_route ()
-        {
-            set -- "route" "$@"
-            net_parser "$@" || return 0
-            shift $SHIFT
-            ERROR=$(run_ip "route" "$COMMAND" "$DESTINATION" "$@" 2>&1) || {
-                say "$ERROR"
-                return "$RESULT"
-            }
-        }
-
         show_routes ()
         {
             set -- "route" "show" "$@"
@@ -1148,22 +1145,32 @@ resolve_dependencies ()
             shift $SHIFT
             run_ip "route" "show" ${DESTINATION:-} "$@" | awk '
                 BEGIN {
+                    gateway = "'"${GATEWAY_IP:-}"'"
                     interface = "'"${NET_DEVICE:-}"'"
                 }
                 {
-                    if (interface == "") {
+                    if (gateway == "" && interface == "") {
                         print $0
                         next
                     }
+
+                    current_gateway = ""
+                    current_interface = ""
+
                     for (i = 1; i < NF; i++) {
-                        if ($i == "dev") {
-                            dev_value = $(i+1)
-                            if (dev_value == interface) {
-                                print $0
-                            }
-                            next
-                        }
+                        if ($i == "via")
+                            current_gateway = $(i+1)
+                        if ($i == "dev")
+                            current_interface = $(i+1)
                     }
+
+                    if (interface != "" && current_interface != interface)
+                        next
+
+                    if (gateway != "" && current_gateway != gateway)
+                        next
+
+                    print $0
                 }
             '
         }
@@ -1382,38 +1389,43 @@ resolve_dependencies ()
                 shift $SHIFT
                 run_netstat -rn | awk '
                     BEGIN {
-                        interface = "'"${NET_DEVICE:-}"'"
                         destination = "'"${DESTINATION:-}"'"
+                        gateway = "'"${GATEWAY_IP:-}"'"
+                        interface = "'"${NET_DEVICE:-}"'"
                     }
                     $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
-                        if (interface != "" && $NF != interface) {
+
+                        if (destination == "" && gateway == "" && interface == "") {
+                            print $1, $2, $NF
                             next
                         }
+
                         if (destination != "") {
+
                             match_found = "no"
+
                             if (destination == $1) {
                                 match_found = "yes"
-                            } else if (
-                                (
-                                    destination == "0.0.0.0" ||
-                                    destination == "::/0"
-                                ) && (
-                                    $1 == "default"
-                                )
-                            ) {
-                                match_found = "yes"
-                            } else if (
-                                (
-                                    destination == "default"
-                                ) && (
-                                    $1 == "0.0.0.0" || $1 == "::/0"
-                                )
-                            ) {
+                            }
+                            else if ((destination == "0.0.0.0" || destination == "::/0") && ($1 == "default")) {
                                 match_found = "yes"
                             }
+                            else if ((destination == "default") && ($1 == "0.0.0.0" || $1 == "::/0")) {
+                                match_found = "yes"
+                            }
+
                             if (match_found != "yes")
                                 next
                         }
+
+                        if (gateway != "" && $2 != gateway) {
+                            next
+                        }
+
+                        if (interface != "" && $NF != interface) {
+                            next
+                        }
+
                         print $1, $2, $NF
                     }
                 '
@@ -1458,8 +1470,26 @@ resolve_dependencies ()
     return "$EXIT_CODE"
 }
 
-resolve_route ()
+get_gateway_interface ()
 {
+    show_routes $FAMILY "$1" | awk '{print $NF}'
+}
+
+resolve_control_route ()
+{
+    is_equal "$NET_TOOL" ifconfig || {
+        control_route ()
+        {
+            set -- "route" "$@"
+            net_parser "$@" || return 0
+            shift $SHIFT
+            ERROR=$(run_ip "route" "$COMMAND" "$DESTINATION" "$@" 2>&1) || {
+                say "$ERROR"
+                return "$RESULT"
+            }
+        }
+        return
+    }
     # (RFC 5737 / RFC 3849)
     TEST_IP4="192.0.2.255"
     TEST_IP6="2001:db8::255"
@@ -1762,7 +1792,7 @@ verify_network_state ()
     is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" ||
         say "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
 
-    is_equal "$NET_TOOL" ip || resolve_route ||
+    resolve_control_route ||
         say "error: environment: 'route' is unusable: network stack support check failed"
 
     is_equal "$ROLE" "slave-passive" || {
@@ -2285,6 +2315,7 @@ format_route ()
 
 is_local_interface ()
 {
+    is_not_empty "${1:-}" || return 0
     show_interfaces | awk '
         $1 ~ /^'"$1"'$/ {
             found = "yes"
@@ -2365,6 +2396,8 @@ check_gateways ()
         if is_equal "$DO_PING" "yes"
         then
             control_route "$FAMILY" replace $PING_ROUTE || return
+            is_not_empty "$LOCAL_INTERFACE" ||
+                LOCAL_INTERFACE=$(get_gateway_interface "$PING_IP")
             check_ping -I "$LOCAL_INTERFACE" "$PING_IP" || {
                 control_route "$FAMILY" del $PING_ROUTE || return
                 say "host '$PING_HOST' is unreachable via route '$ROUTE'"
@@ -2373,7 +2406,7 @@ check_gateways ()
             }
             control_route "$FAMILY" del $PING_ROUTE || return
         else
-            check_ping -I "$LOCAL_INTERFACE" "$GATEWAY_IP" || {
+            check_ping ${LOCAL_INTERFACE:+-I "$LOCAL_INTERFACE"} "$GATEWAY_IP" || {
                 say "gateway '$GATEWAY_IP' is unreachable${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
                 collect_dead_route
                 continue
@@ -2497,53 +2530,47 @@ bit2Human ()
     puts "$BIT${REMAINS:-} $UNIT"
 }
 
+evaluate_gateway ()
+{
+    say "probing gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
+    check_ping ${LOCAL_INTERFACE:+-I "$LOCAL_INTERFACE"} "$GATEWAY_IP" &&
+    say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}" || {
+        say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
+        return "$RESULT"
+    }
+}
+
 evaluate_speed ()
 {
     say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
-
     control_route "$FAMILY" replace $SPEEDTEST_ROUTE || return
-    if speedtest
-    then
-        test "$BEST_SPEED" -ge "$BIT" || {
-            BEST_GATEWAY="$GATEWAY"
-            BEST_ROUTE="$ROUTE"
-            BEST_SPEED="$BIT"
-        }
-        control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
-        say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-    else
-        control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
-        say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
-        return 1
-    fi
+
+    is_not_empty "$LOCAL_INTERFACE" ||
+        LOCAL_INTERFACE=$(get_gateway_interface "$SPEEDTEST_IP")
+
+    speedtest && {
+        test "$BEST_SPEED" -ge "$BIT" || BEST_SPEED="$BIT"
+        say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP on '$LOCAL_INTERFACE'"
+    } || say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+
+    control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
+    return "$RESULT"
 }
 
 evaluate_host ()
 {
     say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
     control_route "$FAMILY" replace $PING_ROUTE || return
-    check_ping -I "$LOCAL_INTERFACE" "$PING_IP" && {
-        control_route "$FAMILY" del $PING_ROUTE || return
-        say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
-        BEST_GATEWAY="$GATEWAY"
-        BEST_ROUTE="$ROUTE"
-    } || {
-        control_route "$FAMILY" del $PING_ROUTE || return
-        say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
-        check_ping -I "$LOCAL_INTERFACE" "$GATEWAY_IP" &&
-            say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}" ||
-            say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-    }
-}
 
-evaluate_gateway ()
-{
-    say "probing gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-    check_ping -I "$LOCAL_INTERFACE" "$GATEWAY_IP" && {
-        say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-        BEST_GATEWAY="$GATEWAY"
-        BEST_ROUTE="$ROUTE"
-    } || say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
+    is_not_empty "$LOCAL_INTERFACE" ||
+        LOCAL_INTERFACE=$(get_gateway_interface "$PING_IP")
+
+    check_ping -I "$LOCAL_INTERFACE" "$PING_IP" && {
+        say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+    } || say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+
+    control_route "$FAMILY" del $PING_ROUTE || return
+    return "$RESULT"
 }
 
 add_routes ()
@@ -2674,15 +2701,23 @@ reconcile_gateways ()
                 continue
             }
 
-            is_equal "$DO_SPEEDTEST" "yes" && evaluate_speed ||
-            if is_empty "${BEST_ROUTE:-}"
+            if evaluate_gateway
             then
-                if is_equal "$DO_PING" "yes"
+                if is_equal "$DO_SPEEDTEST" yes
+                then
+                    evaluate_speed || {
+                        is_equal "$DO_PING" yes && evaluate_host
+                    }
+                elif is_equal "$DO_PING" yes
                 then
                     evaluate_host
                 else
-                    evaluate_gateway
-                fi
+                    collect_alive_route
+                    CURRENT_METRIC=
+                fi && {
+                    BEST_GATEWAY="$GATEWAY"
+                    BEST_ROUTE="$ROUTE"
+                } || :
             fi
         done
 
