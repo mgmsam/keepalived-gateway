@@ -6,9 +6,13 @@
 
 ## Исправить функции
 
-`control_route`
+`evaluate_gateway`
 
-- [X] принять на обработку отрицательный код возврата комад.
+- [ ] Укоротить сообщения
+
+`control_route`/`evaluate_speed`/`evaluate_host`
+
+- [X] Принять на обработку отрицательный код возврата комад.
 
 `resolve_dependencies`
 
