@@ -2311,6 +2311,7 @@ format_route ()
         SPEEDTEST_ROUTE="$SPEEDTEST_IP $GATEWAY_IP $LOCAL_INTERFACE"
         PING_ROUTE="$PING_IP $GATEWAY_IP $LOCAL_INTERFACE"
     }
+    SHOW_ROUTE="show_routes $FAMILY -g $GATEWAY_IP${LOCAL_INTERFACE:+ -i $LOCAL_INTERFACE}"
 }
 
 is_local_interface ()
@@ -2606,27 +2607,50 @@ EOF
     is_not_empty "${CURRENT_ROUTES:-}" || return
 }
 
+get_current_routes ()
+{
+    CURRENT_ROUTES=
+    while read SHOW_ROUTE
+    do
+        CURRENT_ROUTES="${CURRENT_ROUTES:+$CURRENT_ROUTES$LF}$($SHOW_ROUTE)"
+    done <<EOF
+$SHOW_ROUTES
+EOF
+}
+
 get_obsolete_routes ()
 {
     OBSOLETE_FILTER='
         BEGIN {
             found_separator = "no"
         }
-        $0 == "" && found_separator == "no" {
+
+        $0 == "" {
             found_separator = "yes"
             next
         }
+
+        {
+            $1=$1
+            clean = $0
+            gsub(/dev [^ ]+/, "", clean)
+            gsub(/  +/, " ", clean)
+        }
+
         found_separator == "no" {
-            wanted[$0] = "yes"
+            wanted[clean] = "yes"
             next
         }
-        found_separator == "yes" && !($0 in wanted) {
-            print $0
+
+        found_separator == "yes" {
+            if (!(clean in wanted)) {
+                print $0
+            }
         }
     '
     REMOVE_ROUTES=$(awk "$OBSOLETE_FILTER" <<EOF
 $1
-
+$LF
 $CURRENT_ROUTES
 EOF
     )
@@ -2644,13 +2668,13 @@ refresh_routing_table ()
     EXIT_CODE="0"
     is_empty "${DEFAULT_GATEWAYS_IPV4:-}" || {
         add_routes -4 "$DEFAULT_ROUTES_IPV4" &&
-        get_current_routes -4 &&
+        get_current_routes &&
         get_obsolete_routes "$DEFAULT_ROUTES_IPV4" &&
         remove_obsolete_routes -4 || :
     }
     is_empty "${DEFAULT_GATEWAYS_IPV6:-}" || {
         add_routes -6 "$DEFAULT_ROUTES_IPV6" &&
-        get_current_routes -6 &&
+        get_current_routes &&
         get_obsolete_routes "$DEFAULT_ROUTES_IPV6" &&
         remove_obsolete_routes -6 || :
     }
@@ -2717,6 +2741,7 @@ reconcile_gateways ()
                 fi && {
                     BEST_GATEWAY="$GATEWAY"
                     BEST_ROUTE="$ROUTE"
+                    SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
                 } || :
             fi
         done
