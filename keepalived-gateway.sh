@@ -1021,6 +1021,51 @@ resolve_dependencies ()
             }
         }
     '
+    AWK_ROUTE_FILTER='
+        /Destination/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "Met" || $i == "Metric")
+                    idx_metric = i
+                if ($i == "Hop")
+                    idx_hop = i
+            }
+            next
+        }
+
+        $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
+
+            destination = $1
+            gateway     = $2
+            shift = (idx_hop ? 1 : 0)
+            metric  = (idx_metric ? $(idx_metric - shift) : "0")
+            interface   = $NF
+
+            if (find_destination != "") {
+                match_destination = "no"
+                if (find_destination == destination) {
+                    match_destination =  "yes"
+                } else if ((find_destination == "0.0.0.0" || find_destination == "::/0") && (destination == "default")) {
+                    match_destination =  "yes"
+                } else if ((find_destination == "default") && (destination == "0.0.0.0" || destination == "::/0")) {
+                    match_destination =  "yes"
+                }
+                if (match_destination == "no")
+                    next
+            }
+
+            if (find_gateway != "" && gateway != find_gateway)
+                next
+
+            if (find_interface != "" && interface != find_interface)
+                next
+
+            if (metric == "0") {
+                printf "%s %s %s\n", destination, gateway, interface
+            } else {
+                printf "%s %s %s %s\n", destination, gateway, interface, metric
+            }
+        }
+    '
 
     net_parser ()
     {
@@ -1068,8 +1113,16 @@ resolve_dependencies ()
             SHIFT=$((SHIFT + 1))
             shift
         done
-
-        case "${DESTINATION:-$GATEWAY_IP}" in
+        case "$COMMAND" in
+            add | del | delete | replace)
+                case "$FAMILY" in
+                    "" | -46 | -46)
+                        return 1
+                    ;;
+                esac
+            ;;
+        esac
+        case "${GATEWAY_IP:-${DESTINATION:-}}" in
             *:*:*)
                 case "${FAMILY:-}" in
                     "" | *6*)
@@ -1340,11 +1393,38 @@ resolve_dependencies ()
         fi
     elif is_equal "${NET_TOOL:-}" "ifconfig"
     then
+        awk_route_filter ()
+        {
+            awk '
+                BEGIN {
+                    find_destination = "'"${DESTINATION:-}"'"
+                    find_gateway     = "'"${GATEWAY_IP:-}"'"
+                    find_interface   = "'"${NET_DEVICE:-}"'"
+                    idx_metric       = 0
+                }
+                '"$AWK_ROUTE_FILTER"'
+            '
+        }
+
+        if type route >/dev/null 2>&1
+        then
+            if route >/dev/null 2>&1
+            then
+                show_routes ()
+                {
+                    net_parser "$@" || return 0
+                    shift $SHIFT
+                    run_route -n | awk_route_filter
+                }
+            fi
+        else
+            say 127 "error: environment: route management impossible: 'route' not found"
+        fi
+
         if type netstat >/dev/null 2>&1
         then
             NETSTAT4="netstat"
             NETSTAT6=""
-
             for i in -4 --inet "-f inet"
             do
                 if netstat $i -rn
@@ -1373,69 +1453,33 @@ resolve_dependencies ()
                         ${NETSTAT6:-$NETSTAT4} "$@"
                     ;;
                     -64)
-                        is_empty ${NETSTAT6:-} "$@" || $NETSTAT6 "$@"
+                        is_empty ${NETSTAT6:-} || $NETSTAT6 "$@"
                         $NETSTAT4 "$@"
                     ;;
                     -46 | "")
                         $NETSTAT4 "$@"
-                        is_empty ${NETSTAT6:-} "$@" || $NETSTAT6 "$@"
+                        is_empty ${NETSTAT6:-} || $NETSTAT6 "$@"
                     ;;
                 esac
             }
 
+            type show_routes >/dev/null 2>&1 ||
             show_routes ()
             {
                 net_parser "$@" || return 0
                 shift $SHIFT
-                run_netstat -rn | awk '
-                    BEGIN {
-                        destination = "'"${DESTINATION:-}"'"
-                        gateway = "'"${GATEWAY_IP:-}"'"
-                        interface = "'"${NET_DEVICE:-}"'"
-                    }
-                    $1 ~ /^([0-9a-fA-F:]+(\/[0-9]+)?|[0-9.]+(\/[0-9]+)?|default)$/ {
-
-                        if (destination == "" && gateway == "" && interface == "") {
-                            print $1, $2, $NF
-                            next
-                        }
-
-                        if (destination != "") {
-
-                            match_found = "no"
-
-                            if (destination == $1) {
-                                match_found = "yes"
-                            }
-                            else if ((destination == "0.0.0.0" || destination == "::/0") && ($1 == "default")) {
-                                match_found = "yes"
-                            }
-                            else if ((destination == "default") && ($1 == "0.0.0.0" || $1 == "::/0")) {
-                                match_found = "yes"
-                            }
-
-                            if (match_found != "yes")
-                                next
-                        }
-
-                        if (gateway != "" && $2 != gateway) {
-                            next
-                        }
-
-                        if (interface != "" && $NF != interface) {
-                            next
-                        }
-
-                        print $1, $2, $NF
-                    }
-                '
+                run_netstat -rn | awk_route_filter
             }
         else
-            say 127 "error: environment: routing table check impossible: 'netstat' not found"
+            case "$ROLE" in
+                single | slave | slave-passive | unknown)
+                    type show_routes >/dev/null 2>&1 ||
+                        say 127 "error: environment: routing table check impossible: 'route' or 'netstat' not found"
+                ;;
+                *)
+                    say 127 "error: environment: port check is impossible: 'netstat' not found"
+            esac
         fi
-
-        type route >/dev/null 2>&1 ||
-            say 127 "error: environment: route management impossible: 'route' not found"
     fi
 
     is_equal "$DO_SPEEDTEST" "no" || {
@@ -1490,6 +1534,7 @@ resolve_control_route ()
         }
         return
     }
+
     # (RFC 5737 / RFC 3849)
     TEST_IP4="192.0.2.255"
     TEST_IP6="2001:db8::255"
@@ -1501,89 +1546,114 @@ resolve_control_route ()
     ROUTE4="route"
     ROUTE6=""
 
+    run_route ()
+    {
+        case "${FAMILY:-}" in
+            -4)
+                $ROUTE4 "$@"
+            ;;
+            -6)
+                $ROUTE6 "$@"
+            ;;
+            -64)
+                is_empty ${ROUTE6:-} || $ROUTE6 "$@"
+                $ROUTE4 "$@"
+            ;;
+            -46 | "")
+                $ROUTE4 "$@"
+                is_empty ${ROUTE6:-} || $ROUTE6 "$@"
+            ;;
+        esac
+    }
+
+    apply_route_full ()
+    {
+        run_route "$1" "$2" ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
+    }
+
+    apply_route_short ()
+    {
+        run_route "$1" "$2" ${3:-} ${4:+${METRIC_FLAG:-} "$4"}
+    }
+
+    probe_route_syntax ()
+    {
+        ERROR="$(route $1 add "$2" gw "$3" dev lo 2>&1 >/dev/null)" && {
+            is_empty "$ERROR" && {
+                route $1 delete "$2"
+                APPLY_ROUTE=apply_route_full
+                return 0
+            } >/dev/null
+        } || {
+            ERROR="$(route $1 add "$2" "$3" 2>&1 >/dev/null)" && {
+                if is_empty "$ERROR"
+                then
+                    route $1 delete "$2" "$3"
+                    APPLY_ROUTE=apply_route_short
+                    return 0
+                fi
+            } >/dev/null
+        }
+        return 1
+    }
+
+    if is_equal "$HAS_IPV4_STACK" "yes"
+    then
+        for i in -4 "-A inet" "-A inet4" --inet --inet4 -inet -inet4 "-f inet" "-f inet4"
+        do
+            probe_route_syntax "$i" "$TEST_IP4" "$LOCAL_IP4" || continue
+            ROUTE4="route $i"
+            break
+        done
+    fi
+
+    if is_equal "$HAS_IPV6_STACK" "yes"
+    then
+        for i in -6 "-A inet6" --inet6 -inet6 "-f inet6"
+        do
+            probe_route_syntax "$i" "$TEST_IP6" "$LOCAL_IP6" || continue
+            ROUTE6="route $i"
+            break
+        done
+    fi
+
     is_not_empty "${METRIC_FLAG:-}" || {
 
-        if is_equal "$HAS_IPV4_STACK" "yes"
-        then
-            for i in -4 "-f inet4" "-inet4" "-A inet4"
-            do
-                if route $i add "$TEST_IP4" "$LOCAL_IP4"
-                then
-                    route $i delete "$TEST_IP4" "$LOCAL_IP4"
-                    ROUTE4="route $i"
-                    break
-                fi
-            done
-        fi
-
-        if is_equal "$HAS_IPV6_STACK" "yes"
-        then
-            for i in -6 "-f inet6" "-inet6" "-A inet6"
-            do
-                if route $i add "$TEST_IP6" "$LOCAL_IP6"
-                then
-                    route $i delete "$TEST_IP6" "$LOCAL_IP6"
-                    ROUTE6="route $i"
-                    break
-                fi
-            done
-        fi
-
         is_equal "$HAS_IPV4_STACK" "yes" && {
-            ROUTE="$ROUTE4"
+            FAMILY=-4
             DESTINATION="$TEST_IP4"
             LOCAL_IP="$LOCAL_IP4"
         } || {
             is_equal "$HAS_IPV6_STACK" "yes" && {
-                ROUTE="$ROUTE6"
+                FAMILY=-6
                 DESTINATION="$TEST_IP6"
                 LOCAL_IP="$LOCAL_IP6"
             } || return
         }
 
+        is_equal "$APPLY_ROUTE" apply_route_full && INTERFACE=lo || INTERFACE=
         for METRIC_FLAG in metric -metric -priority -weight
         do
-            $ROUTE add "$DESTINATION" "$LOCAL_IP" "$METRIC_FLAG" 15 &&
+            "$APPLY_ROUTE" add "$DESTINATION" "$LOCAL_IP" $INTERFACE 15 &&
                 break || METRIC_FLAG=""
-        done
+        done >/dev/null 2>&1
 
         is_not_empty "${METRIC_FLAG:-}" || {
-            $ROUTE add "$DESTINATION" "$LOCAL_IP" 15 || {
-                $ROUTE add "$DESTINATION" "$LOCAL_IP" || return
+            "$APPLY_ROUTE" add "$DESTINATION" "$LOCAL_IP" $INTERFACE 15 || {
+                "$APPLY_ROUTE" add "$DESTINATION" "$LOCAL_IP" || return
                 IGNOREMETRIC="yes"
             }
-        }
+        } >/dev/null 2>&1
 
-        $ROUTE delete "$DESTINATION" "$LOCAL_IP"
-
-    } >/dev/null 2>&1
+        "$APPLY_ROUTE" delete "$DESTINATION"
+    }
 
     case "${METRIC_FLAG:-}" in
         "" | -metric | -priority | -weight)
-            run_route ()
-            {
-                case "${FAMILY:-}" in
-                    -4)
-                        $ROUTE4 "$1" "$2" ${3:-} ${4:+${METRIC_FLAG:-} "$4"}
-                    ;;
-                    -6)
-                        $ROUTE6 "$1" "$2" ${3:-} ${4:+${METRIC_FLAG:-} "$4"}
-                    ;;
-                esac
-            }
+            APPLY_ROUTE=apply_route_short
         ;;
         metric)
-            run_route ()
-            {
-                case "${FAMILY:-}" in
-                    -4)
-                        $ROUTE4 "$1" "$2" ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
-                    ;;
-                    -6)
-                        $ROUTE6 "$1" "$2" ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
-                    ;;
-                esac
-            }
+            APPLY_ROUTE=apply_route_full
         ;;
     esac
 
@@ -1595,11 +1665,11 @@ resolve_control_route ()
         ERROR=$(
             case "$COMMAND" in
                 replace)
-                    run_route del "$DESTINATION" 2>/dev/null || :
-                    run_route add "$DESTINATION" "$@"
+                    $APPLY_ROUTE del "$DESTINATION" 2>/dev/null || :
+                    $APPLY_ROUTE add "$DESTINATION" "$@"
                 ;;
                 *)
-                    run_route "$COMMAND" "$DESTINATION" "$@"
+                    $APPLY_ROUTE "$COMMAND" "$DESTINATION" "$@"
                 ;;
             esac 2>&1
         ) || {
