@@ -1522,6 +1522,12 @@ get_gateway_interface ()
 resolve_control_route ()
 {
     is_equal "$NET_TOOL" ifconfig || {
+
+        get_route ()
+        {
+            ROUTE="${1:+$1 via $2${3:+ dev $3}${4:+ metric $4}}"
+        }
+
         control_route ()
         {
             set -- "route" "$@"
@@ -1536,15 +1542,30 @@ resolve_control_route ()
     }
 
     # (RFC 5737 / RFC 3849)
-    TEST_IP4="192.0.2.255"
-    TEST_IP6="2001:db8::255"
+    DESTINATION_IP4="192.0.2.255"
+    DESTINATION_IP6="2001:db8::255"
 
-    LOCAL_IP4="127.0.0.1"
-    LOCAL_IP6="::1"
+    GATEWAY_IP4="127.0.0.1"
+    GATEWAY_IP6="::1"
 
     ROUTE=""
     ROUTE4="route"
     ROUTE6=""
+
+    get_route_full ()
+    {
+        ROUTE="${1:+$1 gw $2${3:+ dev $3}${4:+ metric $4}}"
+    }
+
+    get_route_short ()
+    {
+        ROUTE="${1:+$1 $2${4:+ ${METRIC_FLAG:+$METRIC_FLAG }$4}}"
+    }
+
+    get_route ()
+    {
+        $GET_ROUTE "$@"
+    }
 
     run_route ()
     {
@@ -1566,14 +1587,28 @@ resolve_control_route ()
         esac
     }
 
-    apply_route_full ()
+    control_route ()
     {
-        run_route "$1" "$2" ${3:+gw $3} ${4:+dev $4} ${5:+metric $5}
-    }
-
-    apply_route_short ()
-    {
-        run_route "$1" "$2" ${3:-} ${5:+${METRIC_FLAG:-} "$5"}
+        net_parser "$@" || return 0
+        shift "$SHIFT"
+        ERROR=$(
+            case "$COMMAND" in
+                replace)
+                    is_equal "$1" gw && GATEWAY_IP="gw $2" || GATEWAY_IP="$1"
+                    while loop
+                    do
+                        run_route delete "$DESTINATION" $GATEWAY_IP || break
+                    done 2>/dev/null
+                    run_route add "$DESTINATION" "$@"
+                ;;
+                *)
+                    run_route "$COMMAND" "$DESTINATION" "$@"
+                ;;
+            esac 2>&1
+        ) || {
+            say "$ERROR"
+            return "$RESULT"
+        }
     }
 
     probe_route_syntax ()
@@ -1581,7 +1616,7 @@ resolve_control_route ()
         ERROR="$(route $1 add "$2" gw "$3" dev lo 2>&1 >/dev/null)" && {
             is_empty "$ERROR" && {
                 route $1 delete "$2"
-                APPLY_ROUTE=apply_route_full
+                GET_ROUTE=get_route_full
                 return 0
             } >/dev/null
         } || {
@@ -1589,7 +1624,7 @@ resolve_control_route ()
                 if is_empty "$ERROR"
                 then
                     route $1 delete "$2" "$3"
-                    APPLY_ROUTE=apply_route_short
+                    GET_ROUTE=get_route_short
                     return 0
                 fi
             } >/dev/null
@@ -1597,11 +1632,53 @@ resolve_control_route ()
         return 1
     }
 
+    test_route_execution ()
+    {
+        get_route "$2" "$3" lo
+        ERROR="$(route $1 add $ROUTE 2>&1 >/dev/null)" && {
+            is_empty "$ERROR" && {
+                route $1 delete "$2"
+                return 0
+            } >/dev/null
+        }
+        return 1
+    }
+
+    probe_route_syntax ()
+    {
+        if is_not_empty "$GET_ROUTE"
+        then
+            test_route_execution "$@"
+        else
+            for GET_ROUTE in get_route_full get_route_short
+            do
+                test_route_execution "$@" || continue
+                return 0
+            done
+            return 1
+        fi
+    }
+
+    case "${ROUTE_FLAG_METRIC:-}" in
+        metric)
+            GET_ROUTE=get_route_full
+        ;;
+        -metric | -priority | -weight)
+            GET_ROUTE=get_route_short
+        ;;
+        "")
+            GET_ROUTE=
+        ;;
+    esac
+
     if is_equal "$HAS_IPV4_STACK" "yes"
     then
+        is_not_empty "${ROUTE_FLAG_IPV4:-}" &&
+        ROUTE4="route $ROUTE_FLAG_IPV4" ||
         for i in -4 "-A inet" "-A inet4" --inet --inet4 -inet -inet4 "-f inet" "-f inet4"
         do
-            probe_route_syntax "$i" "$TEST_IP4" "$LOCAL_IP4" || continue
+            probe_route_syntax "$i" "$DESTINATION_IP4" "$GATEWAY_IP4" ||
+                continue
             ROUTE4="route $i"
             break
         done
@@ -1609,76 +1686,48 @@ resolve_control_route ()
 
     if is_equal "$HAS_IPV6_STACK" "yes"
     then
+        is_not_empty "${ROUTE_FLAG_IPV6:-}" &&
+        ROUTE6="route $ROUTE_FLAG_IPV6" ||
         for i in -6 "-A inet6" --inet6 -inet6 "-f inet6"
         do
-            probe_route_syntax "$i" "$TEST_IP6" "$LOCAL_IP6" || continue
+            probe_route_syntax "$i" "$DESTINATION_IP6" "$GATEWAY_IP6" ||
+                continue
             ROUTE6="route $i"
             break
         done
     fi
 
-    is_not_empty "${METRIC_FLAG:-}" || {
+    is_equal "$GET_ROUTE" get_route_full  ||
+    is_not_empty "${ROUTE_FLAG_METRIC:-}" || {
 
         is_equal "$HAS_IPV4_STACK" "yes" && {
             FAMILY=-4
-            DESTINATION="$TEST_IP4"
-            LOCAL_IP="$LOCAL_IP4"
+            DESTINATION="$DESTINATION_IP4"
+            GATEWAY_IP="$GATEWAY_IP4"
         } || {
             is_equal "$HAS_IPV6_STACK" "yes" && {
                 FAMILY=-6
-                DESTINATION="$TEST_IP6"
-                LOCAL_IP="$LOCAL_IP6"
+                DESTINATION="$DESTINATION_IP6"
+                GATEWAY_IP="$GATEWAY_IP6"
             } || return
         }
 
-        is_equal "$APPLY_ROUTE" apply_route_full && INTERFACE=lo || INTERFACE=
-        for METRIC_FLAG in metric -metric -priority -weight
+        for METRIC_FLAG in -metric -priority -weight
         do
-            "$APPLY_ROUTE" add "$DESTINATION" "$LOCAL_IP" $INTERFACE 15 &&
+            get_route $DESTINATION $GATEWAY_IP $INTERFACE 15
+            run_route add $ROUTE &&
                 break || METRIC_FLAG=""
         done >/dev/null 2>&1
 
         is_not_empty "${METRIC_FLAG:-}" || {
-            "$APPLY_ROUTE" add "$DESTINATION" "$LOCAL_IP" $INTERFACE 15 || {
-                "$APPLY_ROUTE" add "$DESTINATION" "$LOCAL_IP" || return
+            get_route $DESTINATION $GATEWAY_IP $INTERFACE 15
+            run_route add $ROUTE || {
+                run_route add "$DESTINATION" "$GATEWAY_IP" || return
                 IGNOREMETRIC="yes"
             }
         } >/dev/null 2>&1
 
-        "$APPLY_ROUTE" delete "$DESTINATION"
-    }
-
-    case "${METRIC_FLAG:-}" in
-        "" | -metric | -priority | -weight)
-            APPLY_ROUTE=apply_route_short
-        ;;
-        metric)
-            APPLY_ROUTE=apply_route_full
-        ;;
-    esac
-
-    control_route ()
-    {
-        net_parser "$@" || return 0
-        shift "$SHIFT"
-        eval set -- "$@"
-        ERROR=$(
-            case "$COMMAND" in
-                replace)
-                    while loop
-                    do
-                        $APPLY_ROUTE delete "$DESTINATION" "$1" 2>/dev/null || break
-                    done
-                    $APPLY_ROUTE add "$DESTINATION" "$@"
-                ;;
-                *)
-                    $APPLY_ROUTE "$COMMAND" "$DESTINATION" "$@"
-                ;;
-            esac 2>&1
-        ) || {
-            say "$ERROR"
-            return "$RESULT"
-        }
+        run_route delete "$DESTINATION"
     }
 }
 
@@ -2296,6 +2345,7 @@ remove_routes ()
 {
     while read ROUTE
     do
+        get_route $ROUTE
         say -n "removing IPv${1#-} route '$ROUTE' ..."
         control_route ${1:-} del $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
@@ -2377,16 +2427,16 @@ format_route ()
 
     SHOW_ROUTE="show_routes $FAMILY -g $GATEWAY_IP${LOCAL_INTERFACE:+ -i $LOCAL_INTERFACE}"
 
-    is_equal "$NET_TOOL" "ip" && {
-        ROUTE="default via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}${LOCAL_METRIC:+ metric $LOCAL_METRIC}"
-        SPEEDTEST_ROUTE="$SPEEDTEST_IP via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}"
-        PING_ROUTE="$PING_IP via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}"
-    } || {
-        ROUTE="default $GATEWAY_IP ${LOCAL_INTERFACE:-''} $LOCAL_METRIC"
-        set -- $GATEWAY_IP $LOCAL_INTERFACE
-        SPEEDTEST_ROUTE="$SPEEDTEST_IP $@"
-        PING_ROUTE="$PING_IP $@"
-    }
+    get_route "$SPEEDTEST_IP" $GATEWAY_IP $LOCAL_INTERFACE
+    SPEEDTEST_ROUTE="$ROUTE"
+
+    get_route "$PING_IP" $GATEWAY_IP $LOCAL_INTERFACE
+    PING_ROUTE="$ROUTE"
+
+    get_route default $GATEWAY_IP "$LOCAL_INTERFACE" $LOCAL_METRIC
+    ROUTE="$ROUTE"
+
+    CLEAN_ROUTE="default $GATEWAY_IP "${LOCAL_INTERFACE:-'-'}" $LOCAL_METRIC"
 }
 
 is_local_interface ()
@@ -2428,14 +2478,26 @@ collect_alive_route ()
         -4)
             ALIVE_COUNT_IPV4=$((ALIVE_COUNT_IPV4 + 1))
             ALIVE_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:+$ALIVE_GATEWAYS_IPV4 }$GATEWAY"
-            ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+$ALIVE_METRICS_IPV4 }${METRIC:-0}"
             ALIVE_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:+$ALIVE_ROUTES_IPV4$LF}$ROUTE"
+            ALIVE_CLEAN_ROUTES_IPV4="${ALIVE_CLEAN_ROUTES_IPV4:+$ALIVE_CLEAN_ROUTES_IPV4$LF}$CLEAN_ROUTE"
         ;;
         -6)
             ALIVE_COUNT_IPV6=$((ALIVE_COUNT_IPV6 + 1))
             ALIVE_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:+$ALIVE_GATEWAYS_IPV6 }$GATEWAY"
-            ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+$ALIVE_METRICS_IPV6 }${METRIC:-0}"
             ALIVE_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:+$ALIVE_ROUTES_IPV6$LF}$ROUTE"
+            ALIVE_CLEAN_ROUTES_IPV6="${ALIVE_CLEAN_ROUTES_IPV6:+$ALIVE_CLEAN_ROUTES_IPV6$LF}$CLEAN_ROUTE"
+        ;;
+    esac
+}
+
+collect_alive_metric ()
+{
+    case "$FAMILY" in
+        -4)
+            ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+$ALIVE_METRICS_IPV4 }${METRIC:-0}"
+        ;;
+        -6)
+            ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+$ALIVE_METRICS_IPV6 }${METRIC:-0}"
         ;;
     esac
 }
@@ -2451,13 +2513,13 @@ check_gateways ()
     ALIVE_GATEWAYS_IPV4=""
     ALIVE_METRICS_IPV4=""
     ALIVE_ROUTES_IPV4=""
-    DEAD_ROUTES_IPV4=""
+    ALIVE_CLEAN_ROUTES_IPV4=
 
     ALIVE_COUNT_IPV6="0"
     ALIVE_GATEWAYS_IPV6=""
     ALIVE_METRICS_IPV6=""
     ALIVE_ROUTES_IPV6=""
-    DEAD_ROUTES_IPV6=""
+    ALIVE_CLEAN_ROUTES_IPV6=
 
     for GATEWAY in ${DEFAULT_GATEWAYS_IPV4:-} ${DEFAULT_GATEWAYS_IPV6:-}
     do
@@ -2490,17 +2552,16 @@ check_gateways ()
         fi
         say "alive active route: '$ROUTE'"
         collect_alive_route
+        collect_alive_metric
     done
 
-    is_equal "$ALIVE_COUNT_IPV4" "$TOTAL_METRICS_IPV4" || {
-        is_empty "${DEAD_ROUTES_IPV4:-}" ||
-            say "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
-    }
-    is_equal "$ALIVE_COUNT_IPV6" "$TOTAL_METRICS_IPV6" || {
-        is_empty "${DEAD_ROUTES_IPV6:-}" ||
-            say "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
-    }
+    is_empty "${DEAD_ROUTES_IPV4:-}" ||
+        say "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
+    is_empty "${DEAD_ROUTES_IPV6:-}" ||
+        say "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
 
+    DEAD_ROUTES_IPV4=""
+    DEAD_ROUTES_IPV6=""
     return "$RESULT"
 }
 
@@ -2522,9 +2583,11 @@ collect_route ()
     case "$FAMILY" in
         -4)
             DEFAULT_ROUTES_IPV4="${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE"
+            CLEAN_ROUTES_IPV4="${CLEAN_ROUTES_IPV4:+$CLEAN_ROUTES_IPV4$LF}$BEST_CLEAN_ROUTE"
         ;;
         -6)
             DEFAULT_ROUTES_IPV6="${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE"
+            CLEAN_ROUTES_IPV6="${CLEAN_ROUTES_IPV6:+$CLEAN_ROUTES_IPV6$LF}$BEST_CLEAN_ROUTE"
         ;;
     esac
     BEST_ROUTE=""
@@ -2687,26 +2750,22 @@ get_obsolete_routes ()
             next
         }
 
-        function get_key(line) {
-            gsub(/via +|dev +|metric +|'\''/, "", line)
-            num = split(line, field, " ")
-            return field[1] " " field[2] (num >= 3 ? " " field[num] : "")
-        }
-
         {
-            if ($1 == "0.0.0.0" || $1 == "::/0") {
+            gsub(/via |gw |dev |metric |'\''/, "")
+            if ($1 == "0.0.0.0" || $1 == "::/0")
                 $1 = "default"
-            }
+            $1 = $1
+            key = $1 " " $2 " " $4
         }
 
         found_separator == "no" {
-            wanted[get_key($0)] = "yes"
+            wanted[key] = "yes"
             next
         }
 
         {
-            if (!(get_key($0) in wanted)) {
-                $1 = $1
+            if (!(key in wanted)) {
+                gsub(/ - /, " ")
                 print $0
             }
         }
@@ -2732,13 +2791,13 @@ refresh_routing_table ()
     is_empty "${DEFAULT_GATEWAYS_IPV4:-}" || {
         add_routes -4 "$DEFAULT_ROUTES_IPV4" &&
         get_current_routes &&
-        get_obsolete_routes "$DEFAULT_ROUTES_IPV4" &&
+        get_obsolete_routes "$CLEAN_ROUTES_IPV4" &&
         remove_obsolete_routes -4 || :
     }
     is_empty "${DEFAULT_GATEWAYS_IPV6:-}" || {
         add_routes -6 "$DEFAULT_ROUTES_IPV6" &&
         get_current_routes &&
-        get_obsolete_routes "$DEFAULT_ROUTES_IPV6" &&
+        get_obsolete_routes "$CLEAN_ROUTES_IPV6" &&
         remove_obsolete_routes -6 || :
     }
 }
@@ -2754,11 +2813,14 @@ reconcile_gateways ()
     DEFAULT_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:-}"
     DEFAULT_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:-}"
     DEFAULT_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:-}"
+    CLEAN_ROUTES_IPV4="${ALIVE_CLEAN_ROUTES_IPV4:-}"
+    CLEAN_ROUTES_IPV6="${ALIVE_CLEAN_ROUTES_IPV6:-}"
     CURRENT_FAMILY=""
     CURRENT_METRIC=""
     BEST_GATEWAY=""
     BEST_ROUTE=""
     BEST_SPEED=0
+    SHOW_ROUTES=
 
     while loop
     do
@@ -2798,18 +2860,20 @@ reconcile_gateways ()
                 elif is_equal "$DO_PING" yes
                 then
                     evaluate_host && {
-                        collect_alive_route
+                        collect_alive_metric
                         CURRENT_METRIC=
                     }
                 else
-                    collect_alive_route
+                    collect_alive_metric
                     CURRENT_METRIC=
                 fi && {
                     BEST_GATEWAY="$GATEWAY"
                     BEST_ROUTE="$ROUTE"
+                    BEST_CLEAN_ROUTE="$CLEAN_ROUTE"
                     SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
                 } || :
             else
+                collect_dead_route
                 SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
             fi
         done
