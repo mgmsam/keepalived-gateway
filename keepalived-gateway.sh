@@ -2626,6 +2626,11 @@ is_metric_alive ()
     return 1
 }
 
+collect_show_route ()
+{
+    SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
+}
+
 is_failed_metric ()
 {
     is_metric_alive && return 1 || return 0
@@ -2827,6 +2832,7 @@ reconcile_gateways ()
         for GATEWAY in ${GATEWAYS_IPV4:-} ${GATEWAYS_IPV6:-}
         do
             format_route
+            collect_show_route
             puts
             say "testing IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
 
@@ -2870,11 +2876,9 @@ reconcile_gateways ()
                     BEST_GATEWAY="$GATEWAY"
                     BEST_ROUTE="$ROUTE"
                     BEST_CLEAN_ROUTE="$CLEAN_ROUTE"
-                    SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
                 } || :
             else
                 collect_dead_route
-                SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
             fi
         done
 
@@ -3140,6 +3144,7 @@ sync_gateways ()
     for GATEWAY in ${FETCHED_GATEWAYS_IPV4:-} ${FETCHED_GATEWAYS_IPV6:-}
     do
         format_route
+        collect_show_route
         say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
         is_local_interface "$LOCAL_INTERFACE" || {
             say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
@@ -3147,6 +3152,7 @@ sync_gateways ()
         }
         BEST_GATEWAY="$GATEWAY"
         BEST_ROUTE="$ROUTE"
+        BEST_CLEAN_ROUTE="$CLEAN_ROUTE"
         collect_gateway
         collect_route
     done
