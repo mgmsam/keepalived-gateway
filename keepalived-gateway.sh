@@ -1573,7 +1573,7 @@ resolve_control_route ()
 
     apply_route_short ()
     {
-        run_route "$1" "$2" ${3:-} ${4:+${METRIC_FLAG:-} "$4"}
+        run_route "$1" "$2" ${3:-} ${5:+${METRIC_FLAG:-} "$5"}
     }
 
     probe_route_syntax ()
@@ -1665,7 +1665,10 @@ resolve_control_route ()
         ERROR=$(
             case "$COMMAND" in
                 replace)
-                    $APPLY_ROUTE del "$DESTINATION" 2>/dev/null || :
+                    while loop
+                    do
+                        $APPLY_ROUTE delete "$DESTINATION" "$1" 2>/dev/null || break
+                    done
                     $APPLY_ROUTE add "$DESTINATION" "$@"
                 ;;
                 *)
@@ -2372,16 +2375,18 @@ format_route ()
     LOCAL_INTERFACE="${INTERFACE:-$DEFAULT_INTERFACE}"
     LOCAL_METRIC="${METRIC:-$DEFAULT_METRIC}"
 
+    SHOW_ROUTE="show_routes $FAMILY -g $GATEWAY_IP${LOCAL_INTERFACE:+ -i $LOCAL_INTERFACE}"
+
     is_equal "$NET_TOOL" "ip" && {
         ROUTE="default via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}${LOCAL_METRIC:+ metric $LOCAL_METRIC}"
         SPEEDTEST_ROUTE="$SPEEDTEST_IP via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}"
         PING_ROUTE="$PING_IP via $GATEWAY_IP${LOCAL_INTERFACE:+ dev $LOCAL_INTERFACE}"
     } || {
-        ROUTE="default $GATEWAY_IP '$LOCAL_INTERFACE' '$LOCAL_METRIC'"
-        SPEEDTEST_ROUTE="$SPEEDTEST_IP $GATEWAY_IP $LOCAL_INTERFACE"
-        PING_ROUTE="$PING_IP $GATEWAY_IP $LOCAL_INTERFACE"
+        ROUTE="default $GATEWAY_IP ${LOCAL_INTERFACE:-''} $LOCAL_METRIC"
+        set -- $GATEWAY_IP $LOCAL_INTERFACE
+        SPEEDTEST_ROUTE="$SPEEDTEST_IP $@"
+        PING_ROUTE="$PING_IP $@"
     }
-    SHOW_ROUTE="show_routes $FAMILY -g $GATEWAY_IP${LOCAL_INTERFACE:+ -i $LOCAL_INTERFACE}"
 }
 
 is_local_interface ()
@@ -2660,25 +2665,6 @@ EOF
 
 get_current_routes ()
 {
-    CURRENT_ROUTES=""
-    for INTERFACE in $IFACES
-    do
-        if ROUTES=$(show_routes "$1" -i "$INTERFACE" "default")
-        then
-            while read ROUTE
-            do
-                ROUTE=$(puts $ROUTE)
-                CURRENT_ROUTES="${CURRENT_ROUTES:+$CURRENT_ROUTES$LF}$ROUTE"
-            done <<EOF
-$ROUTES
-EOF
-        fi
-    done 2>/dev/null
-    is_not_empty "${CURRENT_ROUTES:-}" || return
-}
-
-get_current_routes ()
-{
     CURRENT_ROUTES=
     while read SHOW_ROUTE
     do
@@ -2686,11 +2672,12 @@ get_current_routes ()
     done <<EOF
 $SHOW_ROUTES
 EOF
+    is_not_empty "${CURRENT_ROUTES:-}" || return
 }
 
 get_obsolete_routes ()
 {
-    OBSOLETE_FILTER='
+    AWK_OBSOLETE_FILTER='
         BEGIN {
             found_separator = "no"
         }
@@ -2700,25 +2687,31 @@ get_obsolete_routes ()
             next
         }
 
+        function get_key(line) {
+            gsub(/via +|dev +|metric +|'\''/, "", line)
+            num = split(line, field, " ")
+            return field[1] " " field[2] (num >= 3 ? " " field[num] : "")
+        }
+
         {
-            $1=$1
-            clean = $0
-            gsub(/dev [^ ]+/, "", clean)
-            gsub(/  +/, " ", clean)
+            if ($1 == "0.0.0.0" || $1 == "::/0") {
+                $1 = "default"
+            }
         }
 
         found_separator == "no" {
-            wanted[clean] = "yes"
+            wanted[get_key($0)] = "yes"
             next
         }
 
-        found_separator == "yes" {
-            if (!(clean in wanted)) {
+        {
+            if (!(get_key($0) in wanted)) {
+                $1 = $1
                 print $0
             }
         }
     '
-    REMOVE_ROUTES=$(awk "$OBSOLETE_FILTER" <<EOF
+    REMOVE_ROUTES=$(awk "$AWK_OBSOLETE_FILTER" <<EOF
 $1
 $LF
 $CURRENT_ROUTES
@@ -2804,7 +2797,10 @@ reconcile_gateways ()
                     }
                 elif is_equal "$DO_PING" yes
                 then
-                    evaluate_host
+                    evaluate_host && {
+                        collect_alive_route
+                        CURRENT_METRIC=
+                    }
                 else
                     collect_alive_route
                     CURRENT_METRIC=
@@ -2813,6 +2809,8 @@ reconcile_gateways ()
                     BEST_ROUTE="$ROUTE"
                     SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
                 } || :
+            else
+                SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
             fi
         done
 
