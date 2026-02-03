@@ -2834,7 +2834,7 @@ reconcile_gateways ()
             format_route
             collect_show_route
             puts
-            say "testing IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
+            say "testing IPv${FAMILY#-} route: '$ROUTE'"
 
             is_equal "${CURRENT_FAMILY:-}" "$FAMILY" &&
             is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
@@ -3145,7 +3145,7 @@ sync_gateways ()
     do
         format_route
         collect_show_route
-        say "configuring IPv${FAMILY#-} gateway '$GATEWAY_IP'${LOCAL_INTERFACE:+ dev '$LOCAL_INTERFACE'}${LOCAL_METRIC:+ with metric '$LOCAL_METRIC'}"
+        say "configuring IPv${FAMILY#-} route: '$ROUTE'"
         is_local_interface "$LOCAL_INTERFACE" || {
             say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
             continue
