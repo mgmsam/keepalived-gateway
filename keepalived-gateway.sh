@@ -803,11 +803,27 @@ verify_config_syntax ()
         ;;
     esac
 
-    case "${METRIC_FLAG:-}" in
+    case "${ROUTE_FLAG_METRIC:=}" in
         "" | metric | -metric | -priority | -weight)
         ;;
         *)
-            say 2 "error: variable 'METRIC_FLAG': unsupported flag"
+            say 2 "error: variable 'ROUTE_FLAG_METRIC': unsupported flag"
+        ;;
+    esac
+
+    case "${ROUTE_FLAG_IPV4:=}" in
+        "" | -4 | "-A inet" | "-A inet4" | --inet | --inet4 | -inet | -inet4 | "-f inet" | "-f inet4")
+        ;;
+        *)
+            say 2 "error: variable 'ROUTE_FLAG_IPV4': unsupported flag"
+        ;;
+    esac
+
+    case "${ROUTE_FLAG_IPV6:=}" in
+        "" | -6 | "-A inet6" | --inet6 | -inet6 | "-f inet6")
+        ;;
+        *)
+            say 2 "error: variable 'ROUTE_FLAG_IPV6': unsupported flag"
         ;;
     esac
 
@@ -1559,7 +1575,7 @@ resolve_control_route ()
 
     get_route_short ()
     {
-        ROUTE="${1:+$1 $2${4:+ ${METRIC_FLAG:+$METRIC_FLAG }$4}}"
+        ROUTE="${1:+$1 $2${4:+ ${ROUTE_FLAG_METRIC:+$ROUTE_FLAG_METRIC }$4}}"
     }
 
     get_route ()
@@ -1659,7 +1675,7 @@ resolve_control_route ()
         fi
     }
 
-    case "${ROUTE_FLAG_METRIC:-}" in
+    case "$ROUTE_FLAG_METRIC" in
         metric)
             GET_ROUTE=get_route_full
         ;;
@@ -1673,7 +1689,7 @@ resolve_control_route ()
 
     if is_equal "$HAS_IPV4_STACK" "yes"
     then
-        is_not_empty "${ROUTE_FLAG_IPV4:-}" &&
+        is_not_empty "$ROUTE_FLAG_IPV4" &&
         ROUTE4="route $ROUTE_FLAG_IPV4" ||
         for i in -4 "-A inet" "-A inet4" --inet --inet4 -inet -inet4 "-f inet" "-f inet4"
         do
@@ -1686,7 +1702,7 @@ resolve_control_route ()
 
     if is_equal "$HAS_IPV6_STACK" "yes"
     then
-        is_not_empty "${ROUTE_FLAG_IPV6:-}" &&
+        is_not_empty "$ROUTE_FLAG_IPV6" &&
         ROUTE6="route $ROUTE_FLAG_IPV6" ||
         for i in -6 "-A inet6" --inet6 -inet6 "-f inet6"
         do
@@ -1697,8 +1713,8 @@ resolve_control_route ()
         done
     fi
 
-    is_equal "$GET_ROUTE" get_route_full  ||
-    is_not_empty "${ROUTE_FLAG_METRIC:-}" || {
+    is_equal "$GET_ROUTE" get_route_full ||
+    is_not_empty "$ROUTE_FLAG_METRIC" || {
 
         is_equal "$HAS_IPV4_STACK" "yes" && {
             FAMILY=-4
@@ -1712,14 +1728,14 @@ resolve_control_route ()
             } || return
         }
 
-        for METRIC_FLAG in -metric -priority -weight
+        for ROUTE_FLAG_METRIC in -metric -priority -weight
         do
             get_route $DESTINATION $GATEWAY_IP $INTERFACE 15
             run_route add $ROUTE &&
-                break || METRIC_FLAG=""
+                break || ROUTE_FLAG_METRIC=
         done >/dev/null 2>&1
 
-        is_not_empty "${METRIC_FLAG:-}" || {
+        is_not_empty "$ROUTE_FLAG_METRIC" || {
             get_route $DESTINATION $GATEWAY_IP $INTERFACE 15
             run_route add $ROUTE || {
                 run_route add "$DESTINATION" "$GATEWAY_IP" || return
