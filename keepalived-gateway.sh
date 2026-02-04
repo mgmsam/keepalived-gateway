@@ -53,53 +53,60 @@ is_not_empty ()
     esac
 }
 
+true ()
+{
+    return 0
+}
+
+false ()
+{
+    return 1
+}
+
+NON= USE_ESCAPE=
+
 if is_not_empty "${KSH_VERSION:-}"
 then
-    PUTS_TYPE="print" CAN_ESC_OCTAL="yes"
+    PUTS_TYPE=print CAN_ESCAPE=true
     puts ()
     {
-        is_empty "${USE_ESC:-}" && print ${CONTINUE:+"$CONTINUE"} -r -- "$*" ||
-                                   print ${CONTINUE:+"$CONTINUE"}    -- "$*"
+        "$USE_ESCAPE" && print $NON -- "$*" || print -r $NON -- "$*"
     }
 else
     if type printf
     then
-        printf '%b' '\033[0m' && CAN_ESC_OCTAL="yes" ||
-                                 CAN_ESC_OCTAL=""
-        PUTS_TYPE="printf"
+        printf '%b' '\033[0m' && CAN_ESCAPE=true || CAN_ESCAPE=false
+        PUTS_TYPE=printf
         puts ()
         {
-            is_empty "${USE_ESC:-}"  && FORMAT="%s" ||
-                                        FORMAT="${CAN_ESC_OCTAL:+%b}"
-            is_empty "${CONTINUE:-}" && printf "${FORMAT:-%s}\n" "$*" ||
-                                        printf "${FORMAT:-%s}"   "$*"
+            "$USE_ESCAPE" && FORMAT=${CAN_ESCAPE:+%b} || FORMAT=%s
+            is_empty "$NON" && printf "${FORMAT:-%s}\n" "$*" ||
+                                    printf "${FORMAT:-%s}"   "$*"
         }
     elif type echo
     then
-        is_equal "X`echo -n`" "X-n" && {
-            is_equal "X`echo '\033[0m'`" "X\033[0m" && CAN_ESC_OCTAL="" ||
-                                                       CAN_ESC_OCTAL="yes"
-            PUTS_TYPE="echo"
+        is_equal "X`echo -n`" X-n && {
+            is_equal "X`echo '\033[0m'`" 'X\033[0m' && CAN_ESCAPE=false ||
+                                                       CAN_ESCAPE=true
+            PUTS_TYPE=echo
             puts ()
             {
-                echo "$*${CONTINUE:+\c}"
+                echo "$*${NON:+\c}"
             }
         } || {
-            is_equal "X`echo -e`" "X-e" && {
-                is_equal "X`echo '\033[0m'`" "X\033[0m" && CAN_ESC_OCTAL="" ||
-                                                           CAN_ESC_OCTAL="yes"
-                PUTS_TYPE="echo_n"
+            is_equal "X`echo -e`" X-e && {
+                is_equal "X`echo '\033[0m'`" 'X\033[0m' && CAN_ESCAPE=false ||
+                                                           CAN_ESCAPE=true
+                PUTS_TYPE=echo_n
                 puts ()
                 {
-                    echo ${CONTINUE:+"$CONTINUE"} "$*"
+                    echo $NON "$*"
                 }
             } || {
-                PUTS_TYPE="echo_ne" CAN_ESC_OCTAL="yes"
+                PUTS_TYPE=echo_ne CAN_ESCAPE=true
                 puts ()
                 {
-                    is_empty "${USE_ESC:-}" &&
-                        echo    ${CONTINUE:+"$CONTINUE"} "$*" ||
-                        echo -e ${CONTINUE:+"$CONTINUE"} "$*"
+                    "$USE_ESCAPE" && echo -e $NON "$*" || echo $NON "$*"
                 }
             }
         }
@@ -111,53 +118,51 @@ fi
 say ()
 {
     RESULT=$?
-    CONTINUE=""
-    NO_PREFIX="no"
-    USE_ESC="yes"
+    NON=
+    NO_PREFIX=false
+    USE_ESCAPE=$CAN_ESCAPE
 
     while is_diff $# 0
     do
         case "${1:-}" in
             -r)
-                USE_ESC=""
+                USE_ESCAPE=false
             ;;
             -n)
-                CONTINUE="-n"
+                NON=-n
             ;;
             -p)
-                NO_PREFIX="yes"
+                NO_PREFIX=true
             ;;
             "" | *[!0123456789]*)
                 break
             ;;
             *)
-                RESULT="$1"
+                RESULT=$1
             ;;
         esac
         shift
     done
 
     is_equal "$RESULT" 0 &&
-        EXIT_CODE="${EXIT_CODE:-0}" ||
-        EXIT_CODE="$RESULT"
+        EXIT_CODE=${EXIT_CODE:-0} ||
+        EXIT_CODE=$RESULT
 
     is_empty "$*" || {
-        case "$NO_PREFIX" in
-            no)
-                puts "${LOG_PREFIX:-$0: }${1:+$*}"
-            ;;
-            *)
-                puts "${1:+$*}"
-            ;;
-        esac
-        CONTINUE=""
+        if "$NO_PREFIX"
+        then
+            puts "${1:+$*}"
+        else
+            puts "${LOG_PREFIX:-$0: }${1:+$*}"
+        fi
+        NON=
     }
 }
 
 die ()
 {
     say "$@" >&2
-    exit "$EXIT_CODE"
+    exit $EXIT_CODE
 }
 
 eval 'ERROR=$(:)' 2>/dev/null ||
@@ -207,20 +212,19 @@ set_state ()
 
 setup_core_env ()
 {
-    is_not_empty "${CAN_ESC_OCTAL:-}" || is_equal "$PUTS_TYPE" "printf" ||
+    "$CAN_ESCAPE" || is_equal "$PUTS_TYPE" printf ||
         die 1 "error: shell environment does not support escape sequences"
 
-    CONTINUE="-n"
-    USE_ESC="${CAN_ESC_OCTAL:-}"
+    USE_ESCAPE=$CAN_ESCAPE
     LF="
 "
-    CR="$(puts "\r")"
-    TAB="$(puts "\t")"
-    SPACE=" "
-    BLANK="$SPACE$TAB"
-    POSIX_IFS="$SPACE$TAB$LF"
-    IFS="$POSIX_IFS"
-    is_file /proc/sys/kernel/ostype && OSTYPE="linux-gnu" || OSTYPE=""
+    CR=$(puts '\r')
+    TAB=$(puts '\t')
+    SPACE=' '
+    BLANK=$SPACE$TAB
+    POSIX_IFS=$SPACE$TAB$LF
+    IFS=$POSIX_IFS
+    is_file /proc/sys/kernel/ostype && OSTYPE=linux-gnu || OSTYPE=
 }
 
 setup_defaults ()
