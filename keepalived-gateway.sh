@@ -2369,37 +2369,36 @@ remove_routes ()
     done <<EOF
 $REMOVE_ROUTES
 EOF
+    REMOVE_ROUTES=
 }
 
 remove_test_route ()
 {
-    REMOVE_ROUTES=""
-
+    REMOVE_ROUTES=
+    AWK_REMOVE_PREFIX='
+        {
+            gsub(/via +|gw +|dev +|metric +/, "")
+            $1 = $1
+            print $0
+        }
+    '
     for IP in ${PING_IPV4:-} ${SPEEDTEST_IPV4:-}
     do
-        ROUTE=$(show_routes -4 "$IP")
-        is_empty "${ROUTE:-}" ||
+        ROUTE=$(show_routes -4 $IP | awk "$AWK_REMOVE_PREFIX")
+        is_empty $ROUTE ||
             REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
     done
-
-    is_empty "${REMOVE_ROUTES:-}" || {
-        remove_routes -4
-        REMOVE_ROUTES=""
-    }
+    is_empty $REMOVE_ROUTES || remove_routes -4
 
     for IP in ${PING_IPV6:-} ${SPEEDTEST_IPV6:-}
     do
-        ROUTE=$(show_routes -6 "$IP")
-        is_empty "${ROUTE:-}" ||
+        ROUTE=$(show_routes -6 $IP | awk "$AWK_REMOVE_PREFIX")
+        is_empty $ROUTE ||
             REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
     done
+    is_empty $REMOVE_ROUTES || remove_routes -6
 
-    is_empty "${REMOVE_ROUTES:-}" || {
-        remove_routes -6
-        REMOVE_ROUTES=""
-    }
-
-    return "$EXIT_CODE"
+    return $EXIT_CODE
 }
 
 clean_and_exit ()
