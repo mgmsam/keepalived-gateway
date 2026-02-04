@@ -426,14 +426,16 @@ parse_gateway_entry ()
     }
 }
 
-collect_gateway_ipv4 ()
+collect_gateway ()
 {
-    GATEWAYS_IPV4=${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
-}
-
-collect_gateway_ipv6 ()
-{
-    GATEWAYS_IPV6=${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
+    case "$FAMILY" in
+        -4)
+            GATEWAYS_IPV4=${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
+        ;;
+        -6)
+            GATEWAYS_IPV6=${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
+        ;;
+    esac
 }
 
 parse_gateway ()
@@ -452,14 +454,7 @@ parse_gateway ()
     do
         NUM=$((NUM + 1))
         parse_gateway_entry
-        case "$FAMILY" in
-            -4)
-                collect_gateway_ipv4
-            ;;
-            -6)
-                collect_gateway_ipv6
-            ;;
-        esac
+        collect_gateway
     done
 }
 
@@ -2519,7 +2514,7 @@ check_gateways ()
     return $RESULT
 }
 
-collect_gateway ()
+collect_default_gateway ()
 {
     case "$FAMILY" in
         -4)
@@ -2793,7 +2788,7 @@ reconcile_gateways ()
             is_equal "$CURRENT_FAMILY" "$FAMILY" &&
             is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
                 is_empty "$BEST_ROUTE" || {
-                    collect_gateway
+                    collect_default_gateway
                     collect_route
                     BEST_SPEED=0
                 }
@@ -2837,7 +2832,7 @@ reconcile_gateways ()
         done
 
         is_empty "$BEST_ROUTE" || {
-            collect_gateway
+            collect_default_gateway
             collect_route
             break
         }
@@ -3107,7 +3102,7 @@ sync_gateways ()
         BEST_GATEWAY=$GATEWAY
         BEST_ROUTE=$ROUTE
         BEST_CLEAN_ROUTE=$CLEAN_ROUTE
-        collect_gateway
+        collect_default_gateway
         collect_route
     done
 
