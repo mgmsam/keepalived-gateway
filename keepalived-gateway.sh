@@ -436,34 +436,6 @@ collect_gateway_ipv6 ()
     GATEWAYS_IPV6=${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
 }
 
-collect_metrics_ipv4 ()
-{
-    case " ${METRICS_IPV4:-} " in
-        *" ${METRIC:-0} "*)
-        ;;
-        *)
-            METRICS_IPV4="${METRICS_IPV4:+$METRICS_IPV4 }${METRIC:-0}"
-        ;;
-    esac
-}
-
-collect_metrics_ipv6 ()
-{
-    case " ${METRICS_IPV6:-} " in
-        *" ${METRIC:-0} "*)
-        ;;
-        *)
-            METRICS_IPV6="${METRICS_IPV6:+$METRICS_IPV6 }${METRIC:-0}"
-        ;;
-    esac
-}
-
-count_metrics ()
-{
-    set -- $1
-    puts $#
-}
-
 parse_gateway ()
 {
     GATEWAYS_IPV4=
@@ -483,17 +455,12 @@ parse_gateway ()
         case "$FAMILY" in
             -4)
                 collect_gateway_ipv4
-                collect_metrics_ipv4
             ;;
             -6)
                 collect_gateway_ipv6
-                collect_metrics_ipv6
             ;;
         esac
     done
-
-    TOTAL_METRICS_IPV4=$(count_metrics "${METRICS_IPV4:-}")
-    TOTAL_METRICS_IPV6=$(count_metrics "${METRICS_IPV6:-}")
 }
 
 parse_interval ()
