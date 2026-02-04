@@ -171,7 +171,7 @@ eval 'ERROR=$(:)' 2>/dev/null ||
 eval 'ERROR=$((0))' 2>/dev/null ||
     die "error: POSIX arithmetic expansion \$((...)) is not supported by this shell."
 
-eval 'ERROR="${ERROR#*:}"' 2>/dev/null ||
+eval 'ERROR=${ERROR#*:}' 2>/dev/null ||
     die "error: POSIX parameter expansion \${VAR#*}, \${VAR%*}, is not supported by this shell."
 
 is_digit ()
@@ -195,7 +195,7 @@ is_file ()
 is_term ()
 {
     test -t "${1:-1}" && IS_TERM=0 || IS_TERM=1
-    return "$IS_TERM"
+    return $IS_TERM
 }
 
 is_root_access ()
@@ -206,7 +206,7 @@ is_root_access ()
 set_state ()
 {
     say "switching to $1 mode"
-    STATE="$1"
+    STATE=$1
     LOG_PREFIX="kg [$1]: "
 }
 
@@ -216,8 +216,8 @@ setup_core_env ()
         die 1 "error: shell environment does not support escape sequences"
 
     USE_ESCAPE=$CAN_ESCAPE
-    LF="
-"
+    LF='
+'
     CR=$(puts '\r')
     TAB=$(puts '\t')
     SPACE=' '
@@ -229,23 +229,23 @@ setup_core_env ()
 
 setup_defaults ()
 {
-    DEFAULT_ROLE="single"
+    DEFAULT_ROLE=single
     DEFAULT_INTERFACE=
     DEFAULT_METRIC=
-    DO_PING="no"
-    DO_SPEEDTEST="no"
-    IGNOREMETRIC="no"
+    DO_PING=no
+    DO_SPEEDTEST=no
+    IGNOREMETRIC=no
 }
 
 include_config ()
 {
-    CONFIG_INCLUDED="no"
-    CONFIG_FILE="/etc/keepalived-gateway.conf"
+    CONFIG_INCLUDED=false
+    CONFIG_FILE=/etc/keepalived-gateway.conf
 
     if is_file "$CONFIG_FILE"
     then
-        OUTPUT="$(. "$CONFIG_FILE" 2>&1)" &&
-        . "$CONFIG_FILE" && CONFIG_INCLUDED="yes" || say "${OUTPUT#*:}"
+        OUTPUT=$(. "$CONFIG_FILE" 2>&1) &&
+        . "$CONFIG_FILE" && CONFIG_INCLUDED=true || say "${OUTPUT#*:}"
     else
         say 2 "error: no such config file: '$CONFIG_FILE'"
     fi
@@ -299,9 +299,9 @@ is_metric ()
 
 is_ipv4 ()
 {
-    IFS="."
+    IFS=.
     set -- $1
-    IFS="$POSIX_IFS"
+    IFS=$POSIX_IFS
 
     is_equal $# 4 || {
         ERROR="invalid IPv4: address must consist of exactly 4 octets"
@@ -352,10 +352,10 @@ is_ipv6 ()
         ;;
     esac
 
-    _IPV6="$1"
-    IFS=":"
+    _IPV6=$1
+    IFS=:
     set -- $1
-    IFS="$POSIX_IFS"
+    IFS=$POSIX_IFS
 
     for i
     do
@@ -382,16 +382,16 @@ is_ipv6 ()
 
 split_gateway ()
 {
-    IFS="@#="
+    IFS=@#=
     read INTERFACE GATEWAY_IP METRIC <<EOF
 $1
 EOF
-    IFS="$POSIX_IFS"
+    IFS=$POSIX_IFS
 
-    case "${INTERFACE:-}" in
+    case "$INTERFACE" in
         *[.:]*)
-            METRIC="$GATEWAY_IP"
-            GATEWAY_IP="$INTERFACE"
+            METRIC=$GATEWAY_IP
+            GATEWAY_IP=$INTERFACE
             INTERFACE=
         ;;
     esac
@@ -406,13 +406,13 @@ parse_gateway_entry ()
             say 2 "error: variable 'GATEWAYS': gateway [$NUM]: gateway is empty"
         ;;
         *.*)
-            is_ipv4 "$GATEWAY_IP" && FAMILY="-4" ||
+            is_ipv4 "$GATEWAY_IP" && FAMILY=-4 ||
                 say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
         ;;
         *)
             GATEWAY_IP="${GATEWAY_IP#[}"
             GATEWAY_IP="${GATEWAY_IP%]}"
-            is_ipv6 "$GATEWAY_IP" && FAMILY="-6" ||
+            is_ipv6 "$GATEWAY_IP" && FAMILY=-6 ||
                 say 2 "error: variable 'GATEWAYS': gateway [$NUM]: $ERROR"
         ;;
     esac
@@ -428,12 +428,12 @@ parse_gateway_entry ()
 
 collect_gateway_ipv4 ()
 {
-    GATEWAYS_IPV4="${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}"
+    GATEWAYS_IPV4=${GATEWAYS_IPV4:+$GATEWAYS_IPV4$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
 }
 
 collect_gateway_ipv6 ()
 {
-    GATEWAYS_IPV6="${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}"
+    GATEWAYS_IPV6=${GATEWAYS_IPV6:+$GATEWAYS_IPV6$LF}${INTERFACE:+$INTERFACE=}$GATEWAY_IP${METRIC:+=$METRIC}
 }
 
 collect_metrics_ipv4 ()
@@ -458,17 +458,6 @@ collect_metrics_ipv6 ()
     esac
 }
 
-collect_interface ()
-{
-    case " ${IFACES:-} " in
-        *" $INTERFACE "*)
-        ;;
-        *)
-            IFACES="${IFACES:+$IFACES }$INTERFACE"
-        ;;
-    esac
-}
-
 count_metrics ()
 {
     set -- $1
@@ -477,15 +466,14 @@ count_metrics ()
 
 parse_gateway ()
 {
-    IFACES=""
-    GATEWAYS_IPV4=""
-    GATEWAYS_IPV6=""
-    METRICS_IPV4=""
-    METRICS_IPV6=""
+    GATEWAYS_IPV4=
+    GATEWAYS_IPV6=
+    METRICS_IPV4=
+    METRICS_IPV6=
 
-    IFS="$IFS,"
+    IFS=$IFS,
     set -- $GATEWAYS
-    IFS="$POSIX_IFS"
+    IFS=$POSIX_IFS
 
     NUM=0
     for GATEWAY
@@ -502,7 +490,6 @@ parse_gateway ()
                 collect_metrics_ipv6
             ;;
         esac
-        is_empty "${INTERFACE:-}" || collect_interface
     done
 
     TOTAL_METRICS_IPV4=$(count_metrics "${METRICS_IPV4:-}")
@@ -523,7 +510,7 @@ parse_interval ()
         *w) INTERVAL=$((${1%w} * 604800)) ;;
         *M) INTERVAL=$((${1%M} * 2678400)) ;;
         *y) INTERVAL=$((${1%y} * 32140800)) ;;
-         *) INTERVAL="${1%s}" ;;
+         *) INTERVAL=${1%s} ;;
     esac
 }
 
@@ -538,12 +525,12 @@ format_duration ()
     M=$((S / 60))
     S=$((S % 60))
 
-    TIMESTRING=""
-    test "$D" -gt 0 && TIMESTRING="${D}d" || :
-    test "$H" -gt 0 && TIMESTRING="${TIMESTRING:+$TIMESTRING, }${H}h" || :
-    test "$M" -gt 0 && TIMESTRING="${TIMESTRING:+$TIMESTRING, }${M}m" || :
+    TIMESTRING=
+    test "$D" -gt 0 && TIMESTRING=${D}d || :
+    test "$H" -gt 0 && TIMESTRING=${TIMESTRING:+$TIMESTRING, }${H}h || :
+    test "$M" -gt 0 && TIMESTRING=${TIMESTRING:+$TIMESTRING, }${M}m || :
     test "$S" -gt 0 ||
-        is_empty "${TIMESTRING:-}" &&
+        is_empty "$TIMESTRING" &&
         TIMESTRING="${TIMESTRING:+$TIMESTRING, }${S}s"
 
     puts "$TIMESTRING"
@@ -567,32 +554,32 @@ is_port ()
 
 parse_resource ()
 {
-    ERROR=""
+    ERROR=
 
-    SCHEME=""
+    SCHEME=
 
-    USER_INFO=""
-    USER=""
-    PASS=""
+    USER_INFO=
+    USER=
+    PASS=
 
-    AUTHORITY=""
-    WWW=""
-    FQDN=""
-    IPV4=""
-    IPV6=""
-    MASK=""
-    PORT=""
+    AUTHORITY=
+    WWW=
+    FQDN=
+    IPV4=
+    IPV6=
+    MASK=
+    PORT=
 
-    RESOURCE=""
-    FAMILY=""
+    RESOURCE=
+    FAMILY=
 
-    HOST="$1"
+    HOST=$1
     HOST="${HOST#${HOST%%[!$BLANK]*}}"
     HOST="${HOST%${HOST##*[!$BLANK]}}"
     case "$HOST" in
         *://*)
             SCHEME="${HOST%%://*}"
-            is_not_empty "${SCHEME:-}" || {
+            is_not_empty "$SCHEME" || {
                 ERROR="protocol scheme is empty"
                 return 1
             }
@@ -609,17 +596,17 @@ parse_resource ()
         */*)
             AUTHORITY="${HOST%%/*}"
             RESOURCE="${HOST#*/}"
-            is_not_empty "${SCHEME:-${WWW:-}}" ||
+            is_not_empty "${SCHEME:-$WWW}" ||
             case "$RESOURCE" in
                 [0-9] | [0-9][0-9] | 1[0-2][0-8])
-                    MASK="$RESOURCE"
-                    RESOURCE=""
+                    MASK=$RESOURCE
+                    RESOURCE=
                 ;;
             esac
         ;;
         *)
-            AUTHORITY="$HOST"
-            RESOURCE=""
+            AUTHORITY=$HOST
+            RESOURCE=
         ;;
     esac
     case "$AUTHORITY" in
@@ -632,10 +619,10 @@ parse_resource ()
                     PASS="${USER_INFO#*:}"
                 ;;
                 *)
-                    USER="$USER_INFO"
+                    USER=$USER_INFO
                 ;;
             esac
-            case "${USER:-}" in
+            case "$USER" in
                 "")
                 ;;
                 *[:@#/?]*)
@@ -651,7 +638,7 @@ parse_resource ()
                     return 4
                 ;;
             esac
-            case "${PASS:-}" in
+            case "$PASS" in
                 "")
                 ;;
                 *[\`\"\$]*)
@@ -682,7 +669,7 @@ parse_resource ()
         *:*)
             case "${AUTHORITY%:*}" in
                 *:*)
-                    HOST="$AUTHORITY"
+                    HOST=$AUTHORITY
                 ;;
                 *)
                     HOST="${AUTHORITY%:*}"
@@ -691,17 +678,17 @@ parse_resource ()
             esac
         ;;
         *)
-            HOST="$AUTHORITY"
+            HOST=$AUTHORITY
         ;;
     esac
 
-    is_empty "${PORT:-}" || is_port "$PORT" ||
+    is_empty "$PORT" || is_port "$PORT" ||
         case $? in
             1) return 8 ;;
             *) return 9 ;;
         esac
 
-    case "${HOST:-}" in
+    case "$HOST" in
         "" | *[!0-9a-zA-Z.:_-]*)
             ERROR="host contains illegal characters or is empty"
             return 10
@@ -719,12 +706,12 @@ parse_resource ()
                             return 12
                         ;;
                     esac
-                    FQDN="$HOST"
+                    FQDN=$HOST
                 ;;
                 *.*.*.*)
                     is_ipv4 "$HOST" || return 13
-                    IPV4="$HOST"
-                    FAMILY="-4"
+                    IPV4=$HOST
+                    FAMILY=-4
                 ;;
                 *)
                     ERROR="unrecognized host format (missing letters or invalid IPv4)"
@@ -741,15 +728,15 @@ parse_resource ()
                     4) return 18 ;;
                     *) return 19 ;;
                 esac
-            IPV6="$HOST"
-            FAMILY="-6"
+            IPV6=$HOST
+            FAMILY=-6
         ;;
         *:*)
             ERROR="invalid port separator or malformed IPv6"
             return 20
         ;;
         *[!0-9]*)
-            FQDN="$HOST"
+            FQDN=$HOST
         ;;
         *)
             ERROR="numeric-only hostnames are not allowed to avoid IP collision"
@@ -760,42 +747,42 @@ parse_resource ()
 
 verify_config_syntax ()
 {
-    is_equal "$CONFIG_INCLUDED" "yes" || {
-        ROLE="unknown"
+    "$CONFIG_INCLUDED" || {
+        ROLE=unknown
         return 0
     }
 
     case "${ROLE:=$DEFAULT_ROLE}" in
         cluster | master | master-advisor | slave | single)
-            DO_PING="yes"
-            DO_SPEEDTEST="yes"
+            DO_PING=yes
+            DO_SPEEDTEST=yes
         ;;
         slave-passive)
-            DO_PING="no"
-            DO_SPEEDTEST="no"
+            DO_PING=no
+            DO_SPEEDTEST=no
         ;;
         *)
-            DO_PING="no"
-            DO_SPEEDTEST="no"
+            DO_PING=no
+            DO_SPEEDTEST=no
             say 2 "error: variable 'ROLE': must be 'cluster, master, master-advisor, single, slave'"
         ;;
     esac
 
-    is_empty "${INTERFACE:-}" || {
-        is_interface "$INTERFACE"  && DEFAULT_INTERFACE="$INTERFACE" ||
+    is_empty "${INTERFACE:=}" || {
+        is_interface "$INTERFACE" && DEFAULT_INTERFACE=$INTERFACE ||
             say 2 "error: variable 'INTERFACE': $ERROR"
     }
 
-    is_empty "${METRIC:-}" || {
-        is_metric "$METRIC" && DEFAULT_METRIC="$METRIC" ||
+    is_empty "${METRIC:=}" || {
+        is_metric "$METRIC" && DEFAULT_METRIC=$METRIC ||
             say 2 "error: variable 'METRIC': route metric $ERROR"
     }
 
-    is_empty "${GATEWAYS:-}" && {
-        is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" ||
-            say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
-    } ||
-    case "${GATEWAYS:-}" in
+    case "${GATEWAYS:=}" in
+        "")
+            is_equal "$ROLE" slave-passive || is_equal "$ROLE" unknown ||
+                say 2 "error: variable 'GATEWAYS': is empty: at least one gateway is required"
+        ;;
         *[!][a-zA-Z0-9$BLANK.:_=,-]*)
             say 2 "error: variable 'GATEWAYS': contains forbidden characters"
         ;;
@@ -832,27 +819,29 @@ verify_config_syntax ()
     esac
 
     parse_interval "${CHECK_INTERVAL:=30}" && {
-        CHECK_INTERVAL="$INTERVAL"
+        CHECK_INTERVAL=$INTERVAL
         HUMAN_INTERVAL=$(format_duration "$CHECK_INTERVAL")
     } || say 2 "error: variable 'CHECK_INTERVAL': must be an integer [s|m|h|d|w|M|y]"
 
-    is_empty "${PING_HOST:-}" && DO_PING="no" || {
+    is_empty "${PING_HOST:-}" && DO_PING=no || {
         parse_resource "$PING_HOST" && {
-            PING_FQDN="${FQDN:-}"
-            PING_IPV4="${IPV4:-}"
-            PING_IPV6="${IPV6:-}"
+            is_equal "$DO_PING" no || {
+                PING_FQDN=$FQDN
+                PING_IPV4=$IPV4
+                PING_IPV6=$IPV6
+            }
         } || say 2 "error: variable 'PING_HOST': $ERROR"
     }
 
     case "${SPEEDTEST:-}" in
         "" | 0 | [nN] | [nN][oO] | [oO][fF][fF] | [fF][aA][lL][sS][eE])
-            DO_SPEEDTEST="no"
+            DO_SPEEDTEST=no
         ;;
         1 | [yY] | [yY][eE][sS] | [oO][nN] | [tT][rR][uU][eE])
-            DO_SPEEDTEST="$DO_SPEEDTEST"
+            DO_SPEEDTEST=$DO_SPEEDTEST
         ;;
         *)
-            DO_SPEEDTEST="no"
+            DO_SPEEDTEST=no
             say 2 "error: variable 'SPEEDTEST': must be 'yes' or 'no'"
         ;;
     esac
@@ -868,20 +857,22 @@ verify_config_syntax ()
     esac
 
     is_empty "${SPEEDTEST_HOST:-}" && {
-        is_equal "$DO_SPEEDTEST" "no" ||
+        is_equal "$DO_SPEEDTEST" no ||
             say 2 "error: variable 'SPEEDTEST_HOST': is required when 'SPEEDTEST' is enabled"
     } || {
         parse_resource "$SPEEDTEST_HOST" && {
-            SPEEDTEST_SCHEME="${SCHEME:=http}"
-            SPEEDTEST_HOSTNAME="${FQDN:-${IPV4:-${IPV6:-}}}"
-            SPEEDTEST_FQDN="${FQDN:-}"
-            SPEEDTEST_IPV4="${IPV4:-}"
-            SPEEDTEST_IPV6="${IPV6:-}"
-            SPEEDTEST_PORT="${PORT:-}"
-            SPEEDTEST_RESOURCE="${RESOURCE:-}${SPEEDTEST_SCOPE:+"/$SPEEDTEST_SCOPE"}"
-            SPEEDTEST_RESOURCE="/${SPEEDTEST_RESOURCE#${SPEEDTEST_RESOURCE%%[!/]*}}"
-            SPEEDTEST_URL="$SCHEME://$SPEEDTEST_HOSTNAME${PORT:+:$PORT}${SPEEDTEST_RESOURCE:-}"
-            SPEEDTEST_NETCAT_ARGS="$SPEEDTEST_HOSTNAME ${SPEEDTEST_PORT:-80} ${SPEEDTEST_RESOURCE:-}"
+            is_equal "$DO_SPEEDTEST" no || {
+                SPEEDTEST_SCHEME=${SCHEME:=http}
+                SPEEDTEST_HOSTNAME=${FQDN:-${IPV4:-$IPV6}}
+                SPEEDTEST_FQDN=$FQDN
+                SPEEDTEST_IPV4=$IPV4
+                SPEEDTEST_IPV6=$IPV6
+                SPEEDTEST_PORT=$PORT
+                SPEEDTEST_RESOURCE=$RESOURCE${SPEEDTEST_SCOPE:+/$SPEEDTEST_SCOPE}
+                SPEEDTEST_RESOURCE=/${SPEEDTEST_RESOURCE#${SPEEDTEST_RESOURCE%%[!/]*}}
+                SPEEDTEST_URL=$SCHEME://$SPEEDTEST_HOSTNAME${PORT:+:$PORT}$SPEEDTEST_RESOURCE
+                SPEEDTEST_NETCAT_ARGS="$SPEEDTEST_HOSTNAME ${SPEEDTEST_PORT:-80} $SPEEDTEST_RESOURCE"
+            }
         } || say 2 "error: variable 'SPEEDTEST_HOST': $ERROR"
     }
 
@@ -892,25 +883,25 @@ verify_config_syntax ()
         parse_resource "$VIRTUAL_IPADDRESS" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
-        is_empty "${SCHEME:-}${USER_INFO:-}${FQDN:-}${PORT:-}${RESOURCE:-}" ||
+        is_empty "$SCHEME$USER_INFO$FQDN$PORT$RESOURCE" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': only plain IPv4/IPv6 [with CIDR] allowed"
 
-        is_not_empty "${IPV4:-${IPV6:-}}" ||
+        is_not_empty "${IPV4:-$IPV6}" ||
             say 2 "error: variable 'VIRTUAL_IPADDRESS': invalid virtual IP address"
 
-        VIP_FAMILY="${FAMILY:-}"
-        VIP="${IPV4:-${IPV6:-}}"
+        VIP_FAMILY=$FAMILY
+        VIP=${IPV4:-$IPV6}
     }
 
     is_empty "${VIRTUAL_PORT:-}" && {
         is_equal "$ROLE" "single" || is_equal "$ROLE" "unknown" ||
             say 2 "error: variable 'VIRTUAL_PORT': is empty: required for roles 'cluster, master, master-advisor, slave'"
     } || {
-        is_port "$VIRTUAL_PORT" && VIP_PORT="$VIRTUAL_PORT" ||
+        is_port "$VIRTUAL_PORT" && VIP_PORT=$VIRTUAL_PORT ||
             say 2 "error: variable 'VIRTUAL_PORT': $ERROR"
     }
 
-    is_empty "${VIP:+${VIP_PORT:-}}" || {
+    is_empty "${VIP:+$VIP_PORT}" || {
         : "${GATEWAYS_STATE_FILE:=/tmp/keepalived-gateway/gateways.state}"
         VIP_URL="http://${VIP%/*}:$VIP_PORT/${GATEWAYS_STATE_FILE##*/}"
         VIP_NETCAT_ARGS="${VIP%/*} $VIP_PORT /${GATEWAYS_STATE_FILE##*/}"
@@ -919,7 +910,7 @@ verify_config_syntax ()
 
 resolve_dependencies ()
 {
-    NET_TOOL=""
+    NET_TOOL=
     AWK_UNIQUE_COLLECT='
         if (!seen[value]) {
             seen[value] = 1
@@ -1089,43 +1080,43 @@ resolve_dependencies ()
 
     net_parser ()
     {
-        FAMILY=""
-        OBJECT=""
-        COMMAND=""
-        DESTINATION=""
-        GATEWAY_IP=""
-        NET_DEVICE=""
-        SHIFT="0"
+        FAMILY=
+        OBJECT=
+        COMMAND=
+        DESTINATION=
+        GATEWAY_IP=
+        NET_DEVICE=
+        SHIFT=0
 
         while is_diff $# 0
         do
             case "${1:-}" in
                 -[46] | -46 | -64)
-                    FAMILY="$1"
+                    FAMILY=$1
                 ;;
                 -d)
-                    DESTINATION="$2"
+                    DESTINATION=$2
                     SHIFT=$((SHIFT + 1))
                     shift
                 ;;
                 -g)
-                    GATEWAY_IP="$2"
+                    GATEWAY_IP=$2
                     SHIFT=$((SHIFT + 1))
                     shift
                 ;;
                 -i)
-                    NET_DEVICE="$2"
+                    NET_DEVICE=$2
                     SHIFT=$((SHIFT + 1))
                     shift
                 ;;
                 address | link | route)
-                    OBJECT="$1"
+                    OBJECT=$1
                 ;;
                 add | del | delete | replace | show | list)
-                    COMMAND="$1"
+                    COMMAND=$1
                 ;;
                 *)
-                    DESTINATION="$1"
+                    DESTINATION=$1
                     SHIFT=$((SHIFT + 1))
                     break
                 ;;
@@ -1142,11 +1133,11 @@ resolve_dependencies ()
                 esac
             ;;
         esac
-        case "${GATEWAY_IP:-${DESTINATION:-}}" in
+        case "${GATEWAY_IP:-$DESTINATION}" in
             *:*:*)
-                case "${FAMILY:-}" in
+                case "$FAMILY" in
                     "" | *6*)
-                        FAMILY="-6"
+                        FAMILY=-6
                     ;;
                     -4)
                         return 1
@@ -1154,9 +1145,9 @@ resolve_dependencies ()
                 esac
             ;;
             *.*.*.*)
-                case "${FAMILY:-}" in
+                case "$FAMILY" in
                     "" | *4*)
-                        FAMILY="-4"
+                        FAMILY=-4
                     ;;
                     -6)
                         return 1
@@ -1168,10 +1159,10 @@ resolve_dependencies ()
 
     if type ip >/dev/null 2>&1
     then
-        NET_TOOL="ip"
+        NET_TOOL=ip
 
-        IP4="ip"
-        IP6=""
+        IP4=ip
+        IP6=
 
         for i in -4 --inet "-f inet"
         do
@@ -1193,7 +1184,7 @@ resolve_dependencies ()
 
         run_ip ()
         {
-            case "${FAMILY:-}" in
+            case "$FAMILY" in
                 -4)
                     $IP4 "$@"
                 ;;
@@ -1201,25 +1192,25 @@ resolve_dependencies ()
                     ${IP6:-$IP4} "$@"
                 ;;
                 -64)
-                    is_empty "${IP6:-}" || $IP6 "$@"
+                    is_empty "$IP6" || $IP6 "$@"
                     $IP4 "$@"
                 ;;
                 -46 | "")
                     $IP4 "$@"
-                    is_empty "${IP6:-}" || $IP6 "$@"
+                    is_empty "$IP6" || $IP6 "$@"
                 ;;
             esac
         }
 
         show_routes ()
         {
-            set -- "route" "show" "$@"
+            set -- route show "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            run_ip "route" "show" ${DESTINATION:-} "$@" | awk '
+            run_ip route show $DESTINATION "$@" | awk '
                 BEGIN {
-                    gateway = "'"${GATEWAY_IP:-}"'"
-                    interface = "'"${NET_DEVICE:-}"'"
+                    gateway = "'"$GATEWAY_IP"'"
+                    interface = "'"$NET_DEVICE"'"
                 }
                 {
                     if (gateway == "" && interface == "") {
@@ -1250,10 +1241,10 @@ resolve_dependencies ()
 
         show_addresses ()
         {
-            set -- "address" "show" "$@"
+            set -- address show "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            run_ip "address" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
+            run_ip address show ${NET_DEVICE:-$DESTINATION} "$@" | awk '
                 BEGIN {
                     family = "'"${FAMILY#-}"'"
                 }
@@ -1263,10 +1254,10 @@ resolve_dependencies ()
 
         show_interfaces ()
         {
-            set -- "link" "show" "$@"
+            set -- link show "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            run_ip "link" "show" ${NET_DEVICE:-${DESTINATION:-}} "$@" | awk '
+            run_ip link show ${NET_DEVICE:-$DESTINATION} "$@" | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
                 /^[0-9]+:/ {
                     value = $2
@@ -1278,12 +1269,12 @@ resolve_dependencies ()
         }
     elif type ifconfig >/dev/null 2>&1
     then
-        NET_TOOL="ifconfig"
+        NET_TOOL=ifconfig
         show_addresses ()
         {
             net_parser "$@" || return 0
             shift $SHIFT
-            ifconfig -a ${NET_DEVICE:-${DESTINATION:-}} 2>/dev/null | awk '
+            ifconfig -a ${NET_DEVICE:-$DESTINATION} 2>/dev/null | awk '
                 BEGIN {
                     family = "'"${FAMILY#-}"'"
                 }
@@ -1295,7 +1286,7 @@ resolve_dependencies ()
         {
             net_parser "$@" || return 0
             shift $SHIFT
-            ifconfig -a ${NET_DEVICE:-${DESTINATION:-}} 2>/dev/null | awk '
+            ifconfig -a ${NET_DEVICE:-$DESTINATION} 2>/dev/null | awk '
                 '"$AWK_NATURAL_SORT_FUNC"'
                 /^[^ ]+ / {
                     value = $1
@@ -1331,7 +1322,7 @@ resolve_dependencies ()
         '
     }
 
-    if is_equal "${NET_TOOL:-}" "ip"
+    if is_equal "$NET_TOOL" ip
     then
         case "$ROLE" in
             single | slave | slave-passive | unknown)
@@ -1362,13 +1353,13 @@ resolve_dependencies ()
                 '
             }
         elif
-            PROC_NET_TCP=""
+            PROC_NET_TCP=
             for i in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6
             do
                 is_file $i &&
                     PROC_NET_TCP="${PROC_NET_TCP:+$PROC_NET_TCP }$i" || :
             done
-            is_not_empty "${PROC_NET_TCP:-}"
+            is_not_empty "$PROC_NET_TCP"
         then
             show_ports ()
             {
@@ -1376,10 +1367,10 @@ resolve_dependencies ()
                 do
                     case "$i" in
                         *tcp*)
-                            STATE_FILTER="0A"
+                            STATE_FILTER=0A
                         ;;
                         *udp*)
-                            STATE_FILTER="[0-9A-F]+"
+                            STATE_FILTER='[0-9A-F]+'
                         ;;
                     esac
                     awk '
@@ -1411,15 +1402,15 @@ resolve_dependencies ()
         else
             say 127 "error: variable 'VIRTUAL_PORT': port check is impossible: 'ss' or 'netstat' not found"
         fi
-    elif is_equal "${NET_TOOL:-}" "ifconfig"
+    elif is_equal "$NET_TOOL" ifconfig
     then
         awk_route_filter ()
         {
             awk '
                 BEGIN {
-                    find_destination = "'"${DESTINATION:-}"'"
-                    find_gateway     = "'"${GATEWAY_IP:-}"'"
-                    find_interface   = "'"${NET_DEVICE:-}"'"
+                    find_destination = "'"$DESTINATION"'"
+                    find_gateway     = "'"$GATEWAY_IP"'"
+                    find_interface   = "'"$NET_DEVICE"'"
                     idx_metric       = 0
                 }
                 '"$AWK_ROUTE_FILTER"'
@@ -1443,8 +1434,8 @@ resolve_dependencies ()
 
         if type netstat >/dev/null 2>&1
         then
-            NETSTAT4="netstat"
-            NETSTAT6=""
+            NETSTAT4=netstat
+            NETSTAT6=
             for i in -4 --inet "-f inet"
             do
                 if netstat $i -rn
@@ -1465,7 +1456,7 @@ resolve_dependencies ()
 
             run_netstat ()
             {
-                case "${FAMILY:-}" in
+                case "$FAMILY" in
                     -4)
                         $NETSTAT4 "$@"
                     ;;
@@ -1473,12 +1464,12 @@ resolve_dependencies ()
                         ${NETSTAT6:-$NETSTAT4} "$@"
                     ;;
                     -64)
-                        is_empty ${NETSTAT6:-} || $NETSTAT6 "$@"
+                        is_empty "$NETSTAT6" || $NETSTAT6 "$@"
                         $NETSTAT4 "$@"
                     ;;
                     -46 | "")
                         $NETSTAT4 "$@"
-                        is_empty ${NETSTAT6:-} || $NETSTAT6 "$@"
+                        is_empty "$NETSTAT6" || $NETSTAT6 "$@"
                     ;;
                 esac
             }
@@ -1502,22 +1493,22 @@ resolve_dependencies ()
         fi
     fi
 
-    is_equal "$DO_SPEEDTEST" "no" || {
-        MISSING_DEPS=""
+    is_equal "$DO_SPEEDTEST" no || {
+        MISSING_DEPS=
         for COMMAND in date wc
         do
             type "$COMMAND" ||
                 MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         done >/dev/null 2>&1
-        is_empty "${MISSING_DEPS:-}" ||
+        is_empty "$MISSING_DEPS" ||
             say 127 "error: environment: speedtest is impossible: '$MISSING_DEPS' not found"
     }
 
     type awk >/dev/null 2>&1 ||
         say 127 "error: environment: parsing impossible: 'awk' not found"
 
-    type sleep >/dev/null 2>&1 && SLEEP="sleep" || {
-        SLEEP="return"
+    type sleep >/dev/null 2>&1 && SLEEP=sleep || {
+        SLEEP=return
         say "WARNING: environment: continuous monitoring impossible: 'sleep' not found"
     }
 
@@ -1527,16 +1518,16 @@ resolve_dependencies ()
             TIMEOUT="timeout"
     } || say 127 "error: environment: process hang protection impossible: 'timeout' not found"
 
-    is_equal "$ROLE" "slave-passive" || is_equal "$ROLE" "unknown" ||
+    is_equal "$ROLE" slave-passive || is_equal "$ROLE" unknown ||
         type ping >/dev/null 2>&1 ||
             say 127 "error: environment: gateway check impossible: 'ping' not found"
 
-    return "$EXIT_CODE"
+    return $EXIT_CODE
 }
 
 get_gateway_interface ()
 {
-    show_routes $FAMILY "$1" | awk '{print $NF}'
+    show_routes "$FAMILY" "$1" | awk '{print $NF}'
 }
 
 resolve_control_route ()
@@ -1550,27 +1541,27 @@ resolve_control_route ()
 
         control_route ()
         {
-            set -- "route" "$@"
+            set -- route "$@"
             net_parser "$@" || return 0
             shift $SHIFT
-            ERROR=$(run_ip "route" "$COMMAND" "$DESTINATION" "$@" 2>&1) || {
+            ERROR=$(run_ip route $COMMAND $DESTINATION "$@" 2>&1) || {
                 say "$ERROR"
-                return "$RESULT"
+                return $RESULT
             }
         }
         return
     }
 
     # (RFC 5737 / RFC 3849)
-    DESTINATION_IP4="192.0.2.255"
-    DESTINATION_IP6="2001:db8::255"
+    DESTINATION_IP4=192.0.2.255
+    DESTINATION_IP6=2001:db8::255
 
-    GATEWAY_IP4="127.0.0.1"
-    GATEWAY_IP6="::1"
+    GATEWAY_IP4=127.0.0.1
+    GATEWAY_IP6=::1
 
-    ROUTE=""
-    ROUTE4="route"
-    ROUTE6=""
+    ROUTE=
+    ROUTE4=route
+    ROUTE6=
 
     get_route_full ()
     {
@@ -1589,7 +1580,7 @@ resolve_control_route ()
 
     run_route ()
     {
-        case "${FAMILY:-}" in
+        case "$FAMILY" in
             -4)
                 $ROUTE4 "$@"
             ;;
@@ -1597,12 +1588,12 @@ resolve_control_route ()
                 $ROUTE6 "$@"
             ;;
             -64)
-                is_empty ${ROUTE6:-} || $ROUTE6 "$@"
+                is_empty "$ROUTE6" || $ROUTE6 "$@"
                 $ROUTE4 "$@"
             ;;
             -46 | "")
                 $ROUTE4 "$@"
-                is_empty ${ROUTE6:-} || $ROUTE6 "$@"
+                is_empty "$ROUTE6" || $ROUTE6 "$@"
             ;;
         esac
     }
@@ -1610,54 +1601,33 @@ resolve_control_route ()
     control_route ()
     {
         net_parser "$@" || return 0
-        shift "$SHIFT"
+        shift $SHIFT
         ERROR=$(
             case "$COMMAND" in
                 replace)
-                    is_equal "$1" gw && GATEWAY_IP="gw $2" || GATEWAY_IP="$1"
+                    is_equal "$1" gw && GATEWAY_IP="gw $2" || GATEWAY_IP=$1
                     while loop
                     do
-                        run_route delete "$DESTINATION" $GATEWAY_IP || break
+                        run_route delete $DESTINATION $GATEWAY_IP || break
                     done 2>/dev/null
-                    run_route add "$DESTINATION" "$@"
+                    run_route add $DESTINATION "$@"
                 ;;
                 *)
-                    run_route "$COMMAND" "$DESTINATION" "$@"
+                    run_route $COMMAND $DESTINATION "$@"
                 ;;
             esac 2>&1
         ) || {
             say "$ERROR"
-            return "$RESULT"
+            return $RESULT
         }
-    }
-
-    probe_route_syntax ()
-    {
-        ERROR="$(route $1 add "$2" gw "$3" dev lo 2>&1 >/dev/null)" && {
-            is_empty "$ERROR" && {
-                route $1 delete "$2"
-                GET_ROUTE=get_route_full
-                return 0
-            } >/dev/null
-        } || {
-            ERROR="$(route $1 add "$2" "$3" 2>&1 >/dev/null)" && {
-                if is_empty "$ERROR"
-                then
-                    route $1 delete "$2" "$3"
-                    GET_ROUTE=get_route_short
-                    return 0
-                fi
-            } >/dev/null
-        }
-        return 1
     }
 
     test_route_execution ()
     {
-        get_route "$2" "$3" lo
-        ERROR="$(route $1 add $ROUTE 2>&1 >/dev/null)" && {
+        get_route $2 $3 lo
+        ERROR=$(route $1 add $ROUTE 2>&1 >/dev/null) && {
             is_empty "$ERROR" && {
-                route $1 delete "$2"
+                route $1 delete $2
                 return 0
             } >/dev/null
         }
@@ -1691,26 +1661,24 @@ resolve_control_route ()
         ;;
     esac
 
-    if is_equal "$HAS_IPV4_STACK" "yes"
+    if is_equal "$HAS_IPV4_STACK" yes
     then
-        is_not_empty "$ROUTE_FLAG_IPV4" &&
-        ROUTE4="route $ROUTE_FLAG_IPV4" ||
+        is_not_empty "$ROUTE_FLAG_IPV4" && ROUTE4="route $ROUTE_FLAG_IPV4" ||
         for i in -4 "-A inet" "-A inet4" --inet --inet4 -inet -inet4 "-f inet" "-f inet4"
         do
-            probe_route_syntax "$i" "$DESTINATION_IP4" "$GATEWAY_IP4" ||
+            probe_route_syntax "$i" $DESTINATION_IP4 $GATEWAY_IP4 ||
                 continue
             ROUTE4="route $i"
             break
         done
     fi
 
-    if is_equal "$HAS_IPV6_STACK" "yes"
+    if is_equal "$HAS_IPV6_STACK" yes
     then
-        is_not_empty "$ROUTE_FLAG_IPV6" &&
-        ROUTE6="route $ROUTE_FLAG_IPV6" ||
+        is_not_empty "$ROUTE_FLAG_IPV6" && ROUTE6="route $ROUTE_FLAG_IPV6" ||
         for i in -6 "-A inet6" --inet6 -inet6 "-f inet6"
         do
-            probe_route_syntax "$i" "$DESTINATION_IP6" "$GATEWAY_IP6" ||
+            probe_route_syntax "$i" $DESTINATION_IP6 $GATEWAY_IP6 ||
                 continue
             ROUTE6="route $i"
             break
@@ -1720,15 +1688,15 @@ resolve_control_route ()
     is_equal "$GET_ROUTE" get_route_full ||
     is_not_empty "$ROUTE_FLAG_METRIC" || {
 
-        is_equal "$HAS_IPV4_STACK" "yes" && {
+        is_equal "$HAS_IPV4_STACK" yes && {
             FAMILY=-4
-            DESTINATION="$DESTINATION_IP4"
-            GATEWAY_IP="$GATEWAY_IP4"
+            DESTINATION=$DESTINATION_IP4
+            GATEWAY_IP=$GATEWAY_IP4
         } || {
-            is_equal "$HAS_IPV6_STACK" "yes" && {
+            is_equal "$HAS_IPV6_STACK" yes && {
                 FAMILY=-6
-                DESTINATION="$DESTINATION_IP6"
-                GATEWAY_IP="$GATEWAY_IP6"
+                DESTINATION=$DESTINATION_IP6
+                GATEWAY_IP=$GATEWAY_IP6
             } || return
         }
 
@@ -1742,19 +1710,19 @@ resolve_control_route ()
         is_not_empty "$ROUTE_FLAG_METRIC" || {
             get_route $DESTINATION $GATEWAY_IP $INTERFACE 15
             run_route add $ROUTE || {
-                run_route add "$DESTINATION" "$GATEWAY_IP" || return
-                IGNOREMETRIC="yes"
+                run_route add $DESTINATION $GATEWAY_IP || return
+                IGNOREMETRIC=yes
             }
         } >/dev/null 2>&1
 
-        run_route delete "$DESTINATION"
+        run_route delete $DESTINATION
     }
 }
 
 resolve_ping ()
 {
-    PING4=""
-    PING6=""
+    PING4=
+    PING6=
 
     if is_equal "$HAS_IPV4_STACK" yes
     then
@@ -1772,16 +1740,16 @@ resolve_ping ()
         then
             PING6="ping6"
         else
-            PING6=""
+            PING6=
         fi >/dev/null 2>&1
     fi
 
-    is_not_empty "${PING4:-${PING6:-}}"
+    is_not_empty "${PING4:-$PING6}"
 }
 
 resolve_fqdn ()
 {
-    is_empty "${PING4:-}" ||
+    is_empty "$PING4" ||
         IPV4=$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
                 gsub(/[][)(:]/, " ", $0)
@@ -1794,7 +1762,7 @@ resolve_fqdn ()
             }
         ') || :
 
-    is_empty "${PING6:-}" ||
+    is_empty "$PING6" ||
         IPV6=$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
                 gsub(/[][)(]/, " ")
@@ -1808,9 +1776,9 @@ resolve_fqdn ()
             }
         ') || :
 
-    if is_empty "${IPV4:+${IPV6:-}}" && is_file "/etc/hosts"
+    if is_empty "${IPV4:+$IPV6}" && is_file "/etc/hosts"
     then
-        is_not_empty "${IPV4:-}" ||
+        is_not_empty "$IPV4" ||
             IPV4=$(awk '
                 /^[ \t]*[^#]/ {
                     for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
@@ -1822,7 +1790,7 @@ resolve_fqdn ()
                 }
             ' /etc/hosts)
 
-        is_not_empty "${IPV6:-}" ||
+        is_not_empty "$IPV6" ||
             IPV6=$(awk '
                 /^[ \t]*[^#]/ {
                     for (i=2; i<=NF; i++) if ($i == "'"$1"'") {
@@ -1835,7 +1803,7 @@ resolve_fqdn ()
             ' /etc/hosts)
     fi
 
-    is_not_empty "${IPV4:-${IPV6:-}}" || {
+    is_not_empty "${IPV4:-$IPV6}" || {
         ERROR="failed to resolve FQDN to IP address: $1"
         return 1
     }
@@ -1883,25 +1851,25 @@ EOF
 is_local_ip ()
 {
     is_not_empty "${1:-}" || return 1
-    for IP in ${LOCAL_IP:-$(show_addresses ${2:-})}
+    for IP in ${LOCAL_IP:-$(show_addresses "${2:-}")}
     do
-        is_diff "$IP" "$1" || return 0
+        is_diff $IP "$1" || return 0
     done
     return 1
 }
 
 verify_gateway_remote ()
 {
-    IFS="="
+    IFS='='
     set -- $GATEWAY
-    IFS="$POSIX_IFS"
+    IFS=$POSIX_IFS
 
     case "${1:-}" in
         *[.:]*)
-            GATEWAY_IP="$1"
+            GATEWAY_IP=$1
         ;;
         *)
-            GATEWAY_IP="$2"
+            GATEWAY_IP=$2
         ;;
     esac
 
@@ -1914,52 +1882,52 @@ verify_gateway_remote ()
 
 verify_network_state ()
 {
-    HAS_IPV4_STACK="no"
-    HAS_IPV6_STACK="no"
+    HAS_IPV4_STACK=no
+    HAS_IPV6_STACK=no
     LOCAL_IP=$(show_addresses)
 
-    for IP in ${LOCAL_IP:-}
+    for IP in $LOCAL_IP
     do
         case "$IP" in
             127.0.0.1)
-                HAS_IPV4_STACK="yes"
+                HAS_IPV4_STACK=yes
             ;;
             ::1)
-                HAS_IPV6_STACK="yes"
+                HAS_IPV6_STACK=yes
             ;;
         esac
-        is_equal "$HAS_IPV4_STACK" "no" ||
-        is_equal "$HAS_IPV6_STACK" "no" || break
+        is_equal "$HAS_IPV4_STACK" no ||
+        is_equal "$HAS_IPV6_STACK" no || break
     done
-    is_equal "$HAS_IPV4_STACK" "yes" || is_equal "$HAS_IPV6_STACK" "yes" ||
+    is_equal "$HAS_IPV4_STACK" yes || is_equal "$HAS_IPV6_STACK" yes ||
         say "error: environment: failed to determine network stack: '127.0.0.1' and '::1' not found"
 
     resolve_control_route ||
         say "error: environment: 'route' is unusable: network stack support check failed"
 
-    is_equal "$ROLE" "slave-passive" || {
+    is_equal "$ROLE" slave-passive || {
         if resolve_ping
         then
-            is_empty "${PING_FQDN:-}" || {
+            is_empty "$PING_FQDN" || {
                 resolve_fqdn "$PING_FQDN" && {
-                    PING_IPV4="${IPV4:-}"
-                    PING_IPV6="${IPV6:-}"
+                    PING_IPV4=$IPV4
+                    PING_IPV6=$IPV6
                 }
             } || say "error: variable 'PING_HOST': $ERROR"
 
-            is_equal "$DO_SPEEDTEST" "no" || is_empty "${SPEEDTEST_FQDN:-}" || {
+            is_equal "$DO_SPEEDTEST" no || is_empty "$SPEEDTEST_FQDN" || {
                 resolve_fqdn "$SPEEDTEST_FQDN" && {
-                    SPEEDTEST_IPV4="${IPV4:-}"
-                    SPEEDTEST_IPV6="${IPV6:-}"
+                    SPEEDTEST_IPV4=$IPV4
+                    SPEEDTEST_IPV6=$IPV6
                 }
             } || say "error: variable 'SPEEDTEST_HOST': $ERROR"
         else
             say "error: environment: 'ping' is unusable: network stack support check failed"
-            DO_PING="no"
-            DO_SPEEDTEST="no"
+            DO_PING=no
+            DO_SPEEDTEST=no
         fi
 
-        is_empty "${GATEWAYS_IPV4:-}" || {
+        is_empty "$GATEWAYS_IPV4" || {
             GATEWAYS_IPV4=$(optimize_gateways "$GATEWAYS_IPV4")
             for GATEWAY in $GATEWAYS_IPV4
             do
@@ -1967,18 +1935,18 @@ verify_network_state ()
                     say "error: variable 'GATEWAYS': IPv4 $ERROR"
             done
 
-            if is_equal "$HAS_IPV4_STACK" "yes"
+            if is_equal "$HAS_IPV4_STACK" yes
             then
-                is_equal "$DO_PING" "no" || is_not_empty "${PING_IPV4:-}" ||
+                is_equal "$DO_PING" no || is_not_empty "$PING_IPV4" ||
                     say 2 "error: variable 'GATEWAYS': IPv4 monitoring is impossible: 'PING_HOST' IPv4 address is unknown"
-                is_equal "$DO_SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV4:-}" ||
+                is_equal "$DO_SPEEDTEST" no || is_not_empty "$SPEEDTEST_IPV4" ||
                     say 2 "error: variable 'GATEWAYS': IPv4 speedtest is impossible: 'SPEEDTEST_HOST' IPv4 address is unknown"
             else
                 say "error: environment: IPv4 gateways are defined, but IPv4 stack is unavailable"
             fi
         }
 
-        is_empty "${GATEWAYS_IPV6:-}" || {
+        is_empty "$GATEWAYS_IPV6" || {
             GATEWAYS_IPV6=$(optimize_gateways "$GATEWAYS_IPV6")
             for GATEWAY in $GATEWAYS_IPV6
             do
@@ -1986,11 +1954,11 @@ verify_network_state ()
                     say "error: variable 'GATEWAYS': IPv6 $ERROR"
             done
 
-            if is_equal "$HAS_IPV6_STACK" "yes"
+            if is_equal "$HAS_IPV6_STACK" yes
             then
-                is_equal "$DO_PING" "no" || is_not_empty "${PING_IPV6:-}" ||
+                is_equal "$DO_PING" no || is_not_empty "$PING_IPV6" ||
                     say 2 "error: variable 'GATEWAYS': IPv6 monitoring is impossible: 'PING_HOST' IPv6 address is unknown"
-                is_equal "$DO_SPEEDTEST" "no" || is_not_empty "${SPEEDTEST_IPV6:-}" ||
+                is_equal "$DO_SPEEDTEST" no || is_not_empty "$SPEEDTEST_IPV6" ||
                     say 2 "error: variable 'GATEWAYS': IPv6 speedtest is impossible: 'SPEEDTEST_HOST' IPv6 address is unknown"
             else
                 say "error: environment: IPv6 gateways are defined, but IPv6 stack is unavailable"
@@ -1998,20 +1966,20 @@ verify_network_state ()
         }
     }
 
-    is_equal "$ROLE" "single" ||
-    case "${VIP_FAMILY:-}" in
+    is_equal "$ROLE" single ||
+    case "$VIP_FAMILY" in
         -4)
             ERROR="IPv4 stack or 127.0.0.1 not found"
-            is_equal "$HAS_IPV4_STACK" "yes"
+            is_equal "$HAS_IPV4_STACK" yes
         ;;
         -6)
             ERROR="IPv6 stack or ::1 not found"
-            is_equal "$HAS_IPV6_STACK" "yes"
+            is_equal "$HAS_IPV6_STACK" yes
         ;;
     esac || say "error: variable 'VIRTUAL_IPADDRESS': $ERROR"
 
-    LOCAL_IP=""
-    return "$EXIT_CODE"
+    LOCAL_IP=
+    return $EXIT_CODE
 }
 
 is_port_free ()
@@ -2033,13 +2001,13 @@ resolve_server ()
 {
     ERROR="sync server determination impossible"
 
-    is_equal "$SLEEP" "sleep" ||
+    is_equal "$SLEEP" sleep ||
         say 127 "error: environment: $ERROR: 'sleep' not found"
 
     is_port_free "$VIP_PORT" ||
         say 1 "error: variable 'VIRTUAL_PORT': $ERROR: port $VIP_PORT is already in use"
 
-    is_equal "$EXIT_CODE" 0 || return 0
+    is_equal $EXIT_CODE 0 || return 0
 
     check_daemon ()
     {
@@ -2080,19 +2048,19 @@ resolve_server ()
                 say "error: $OUTPUT"
     }
 
-    case "${VIP_FAMILY:-}" in
+    case "$VIP_FAMILY" in
         -4)
-            LOCAL_IP="127.0.0.1"
-            BIND_IP="$LOCAL_IP"
+            LOCAL_IP=127.0.0.1
+            BIND_IP=127.0.0.1
         ;;
         -6)
-            LOCAL_IP="::1"
-            BIND_IP="[$LOCAL_IP]"
+            LOCAL_IP=::1
+            BIND_IP='[::1]'
         ;;
     esac
 
-    SERVE_GATEWAYS=""
-    MISSING_DEPS=""
+    SERVE_GATEWAYS=
+    MISSING_DEPS=
     SYNC_SERVER_LIST="nc uhttpd httpd telnetd"
     for COMMAND in $SYNC_SERVER_LIST
     do
@@ -2103,11 +2071,11 @@ resolve_server ()
             case "$COMMAND" in
                 nc)
                     detect_netcat_server &&
-                        SERVE_GATEWAYS="serve_netcat"
+                        SERVE_GATEWAYS=serve_netcat
                 ;;
                 uhttpd | httpd)
                     check_daemon $COMMAND -f -p $BIND_IP:$VIP_PORT && {
-                        SERVE_GATEWAYS="serve_httpd"
+                        SERVE_GATEWAYS=serve_httpd
                         is_equal "$VIP_FAMILY" IPv4 &&
                             SERVER="$COMMAND -f -p $VIP:$VIP_PORT" ||
                             SERVER="$COMMAND -f -p [$VIP]:$VIP_PORT"
@@ -2115,7 +2083,7 @@ resolve_server ()
                 ;;
                 telnetd)
                     check_daemon $COMMAND -F -p $VIP_PORT -b $LOCAL_IP && {
-                        SERVE_GATEWAYS="serve_telnetd"
+                        SERVE_GATEWAYS=serve_telnetd
                         SERVER="$COMMAND -F -p $VIP_PORT -b $VIP -l : -K"
                     }
                 ;;
@@ -2128,7 +2096,7 @@ resolve_server ()
             MISSING_DEPS="${MISSING_DEPS:+$MISSING_DEPS, }$COMMAND"
         fi
     done
-    case "${SERVE_GATEWAYS:-}" in
+    case "$SERVE_GATEWAYS" in
         "")
             say 127 "error: environment: $ERROR: '$MISSING_DEPS' not found"
         ;;
@@ -2136,7 +2104,7 @@ resolve_server ()
             check_gateways_state_file
         ;;
     esac
-    LOCAL_IP=""
+    LOCAL_IP=
 }
 
 is_supported_scheme ()
@@ -2152,7 +2120,7 @@ is_supported_scheme ()
 detect_curl_client ()
 {
     OUTPUT=$(2>&1 curl $1://$2:1 || :)
-    case "${OUTPUT:-}" in
+    case "$OUTPUT" in
         *[Cc]onnect*)
             return 0
         ;;
@@ -2173,7 +2141,7 @@ detect_curl_client ()
 detect_fetch_client ()
 {
     OUTPUT=$(2>&1 fetch $1://$2:1 || :)
-    case "${OUTPUT:-}" in
+    case "$OUTPUT" in
         *[Cc]onnection*)
             return 0
         ;;
@@ -2194,7 +2162,7 @@ detect_fetch_client ()
 detect_netcat_client ()
 {
     OUTPUT=$(2>&1 nc $2 1 || :)
-    case "${OUTPUT:-}" in
+    case "$OUTPUT" in
         "" | *[Cc]onnection*)
             return 0
         ;;
@@ -2211,7 +2179,7 @@ detect_netcat_client ()
 detect_wget_client ()
 {
     OUTPUT=$(2>&1 wget $1://$2:1 || :)
-    case "${OUTPUT:-}" in
+    case "$OUTPUT" in
         *[Cc]onnection*)
             return 0
         ;;
@@ -2231,20 +2199,20 @@ detect_wget_client ()
 
 probe_speedtest_fetcher ()
 {
-    is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" || {
-        is_empty "${SPEEDTEST_IPV4:-}" || {
+    is_not_empty "$FETCH_SPEEDTEST_IPV4" || {
+        is_empty "$SPEEDTEST_IPV4" || {
             say 0 -n "$PREFIX: probing speedtest IPv4 capability..."
             $1 "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 && {
-                FETCH_SPEEDTEST_IPV4="$2 ${SPEEDTEST_TARGET:-}"
+                FETCH_SPEEDTEST_IPV4="$2 $SPEEDTEST_TARGET"
                 say -p " [ OK ]"
             } || say -p "$STATUS"
         }
     }
-    is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" || {
-        is_empty "${SPEEDTEST_IPV6:-}" || {
+    is_not_empty "$FETCH_SPEEDTEST_IPV6" || {
+        is_empty "$SPEEDTEST_IPV6" || {
             say 0 -n "$PREFIX: probing speedtest IPv6 capability..."
             $1 "$SPEEDTEST_SCHEME" [::1] IPv6 && {
-                FETCH_SPEEDTEST_IPV6="$2 ${SPEEDTEST_TARGET:-}"
+                FETCH_SPEEDTEST_IPV6="$2 $SPEEDTEST_TARGET"
                 say -p " [ OK ]"
             } || say -p "$STATUS"
         }
@@ -2255,17 +2223,17 @@ probe_gateway_fetcher ()
 {
     case "$ROLE" in
         cluster | slave | slave-passive)
-            is_not_empty "${FETCH_GATEWAYS:-}" || {
-                if is_equal "$VIP_FAMILY" "-4"
+            is_not_empty "$FETCH_GATEWAYS" || {
+                if is_equal "$VIP_FAMILY" -4
                 then
                     say 0 -n "$PREFIX: probing gateway sync IPv4 capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
-                    is_not_empty "${FETCH_SPEEDTEST_IPV4:-}" ||
+                    is_not_empty "$FETCH_SPEEDTEST_IPV4" ||
                         $1 http 127.0.0.1 IPv4
                 else
                     say 0 -n "$PREFIX: probing gateway sync IPv6 capability..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
-                    is_not_empty "${FETCH_SPEEDTEST_IPV6:-}" ||
+                    is_not_empty "$FETCH_SPEEDTEST_IPV6" ||
                         $1 http [::1] IPv6
                 fi && {
                     FETCH_GATEWAYS="$2 $VIP_TARGET"
@@ -2278,8 +2246,8 @@ probe_gateway_fetcher ()
 
 probe_client_capabilities ()
 {
-    is_equal "$DO_SPEEDTEST" "no" ||
-    is_not_empty "${FETCH_SPEEDTEST_IPV4:+${FETCH_SPEEDTEST_IPV6:-}}" ||
+    is_equal "$DO_SPEEDTEST" no ||
+    is_not_empty "${FETCH_SPEEDTEST_IPV4:+$FETCH_SPEEDTEST_IPV6}" ||
     if is_supported_scheme "$3"
     then
         probe_speedtest_fetcher $1 $2
@@ -2288,15 +2256,15 @@ probe_client_capabilities ()
     fi
 
     probe_gateway_fetcher $1 $2
-    return "$EXIT_CODE"
+    return $EXIT_CODE
 }
 
 resolve_client ()
 {
-    MISSING_DEPS=""
-    FETCH_GATEWAYS=""
-    FETCH_SPEEDTEST_IPV4=""
-    FETCH_SPEEDTEST_IPV6=""
+    MISSING_DEPS=
+    FETCH_GATEWAYS=
+    FETCH_SPEEDTEST_IPV4=
+    FETCH_SPEEDTEST_IPV6=
     CLIENT_LIST="curl fetch wget nc"
     for COMMAND in $CLIENT_LIST
     do
@@ -2307,27 +2275,27 @@ resolve_client ()
             say 0 -p " found"
             case "$COMMAND" in
                 curl)
-                    SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
-                    VIP_TARGET="${VIP_URL:-}"
+                    SPEEDTEST_TARGET=${SPEEDTEST_URL:-}
+                    VIP_TARGET=${VIP_URL:-}
                     probe_client_capabilities detect_curl_client fetch_curl "http https ftp sftp ftps tftp file scp"
                 ;;
                 fetch)
-                    SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
-                    VIP_TARGET="${VIP_URL:-}"
+                    SPEEDTEST_TARGET=${SPEEDTEST_URL:-}
+                    VIP_TARGET=${VIP_URL:-}
                     probe_client_capabilities detect_fetch_client fetch_fetch "http https ftp"
                 ;;
                 nc)
-                    SPEEDTEST_TARGET="${SPEEDTEST_NETCAT_ARGS:-}"
-                    VIP_TARGET="${VIP_NETCAT_ARGS:-}"
+                    SPEEDTEST_TARGET=${SPEEDTEST_NETCAT_ARGS:-}
+                    VIP_TARGET=${VIP_NETCAT_ARGS:-}
                     probe_client_capabilities detect_netcat_client fetch_netcat http
                 ;;
                 wget)
-                    SPEEDTEST_TARGET="${SPEEDTEST_URL:-}"
-                    VIP_TARGET="${VIP_URL:-}"
+                    SPEEDTEST_TARGET=${SPEEDTEST_URL:-}
+                    VIP_TARGET=${VIP_URL:-}
                     probe_client_capabilities detect_wget_client fetch_wget "http https ftp ftps"
                 ;;
             esac && {
-                EXIT_CODE="0"
+                EXIT_CODE=0
                 return
             } || continue
         else
@@ -2346,19 +2314,19 @@ resolve_transfer_tools ()
         ;;
         master | master-advisor)
             resolve_server
-            is_equal "$DO_SPEEDTEST" "no" || resolve_client
+            is_equal "$DO_SPEEDTEST" no || resolve_client
         ;;
         single)
-            is_equal "$DO_SPEEDTEST" "no" || resolve_client
+            is_equal "$DO_SPEEDTEST" no || resolve_client
         ;;
         slave | slave-passive)
             resolve_client
         ;;
         *)
-            EXIT_CODE="1"
+            EXIT_CODE=1
         ;;
     esac
-    return "$EXIT_CODE"
+    return $EXIT_CODE
 }
 
 remove_routes ()
@@ -2367,7 +2335,7 @@ remove_routes ()
     do
         get_route $ROUTE
         say -n "removing IPv${1#-} route '$ROUTE' ..."
-        control_route ${1:-} del $ROUTE >/dev/null 2>&1 &&
+        control_route $1 del $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
     done <<EOF
@@ -2390,7 +2358,7 @@ remove_test_route ()
     do
         ROUTE=$(show_routes -4 $IP | awk "$AWK_REMOVE_PREFIX")
         is_empty $ROUTE ||
-            REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
+            REMOVE_ROUTES=${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE
     done
     is_empty $REMOVE_ROUTES || remove_routes -4
 
@@ -2398,7 +2366,7 @@ remove_test_route ()
     do
         ROUTE=$(show_routes -6 $IP | awk "$AWK_REMOVE_PREFIX")
         is_empty $ROUTE ||
-            REMOVE_ROUTES="${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE"
+            REMOVE_ROUTES=${REMOVE_ROUTES:+$REMOVE_ROUTES$LF}$ROUTE
     done
     is_empty $REMOVE_ROUTES || remove_routes -6
 
@@ -2407,12 +2375,12 @@ remove_test_route ()
 
 clean_and_exit ()
 {
-    EXIT_CODE="${1:-$?}"
+    EXIT_CODE=${1:-$?}
     puts
     trap - 0
     remove_test_route || :
     is_empty "${GATEWAY_SERVER_PID:-}" || kill "$GATEWAY_SERVER_PID" 2>/dev/null
-    exit "$EXIT_CODE"
+    exit $EXIT_CODE
 }
 
 loop ()
@@ -2426,41 +2394,41 @@ format_route ()
 
     case "$GATEWAY_IP" in
         *:*)
-            FAMILY="-6"
-            PING="${PING6:-}"
-            PING_IP="${PING_IPV6:-}"
-            SPEEDTEST_IP="${SPEEDTEST_IPV6:-}"
-            FETCH_SPEEDTEST="${FETCH_SPEEDTEST_IPV6:-}"
+            FAMILY=-6
+            PING=${PING6:-}
+            PING_IP=${PING_IPV6:-}
+            SPEEDTEST_IP=${SPEEDTEST_IPV6:-}
+            FETCH_SPEEDTEST=${FETCH_SPEEDTEST_IPV6:-}
         ;;
         *)
-            FAMILY="-4"
-            PING="${PING4:-}"
-            PING_IP="${PING_IPV4:-}"
-            SPEEDTEST_IP="${SPEEDTEST_IPV4:-}"
-            FETCH_SPEEDTEST="${FETCH_SPEEDTEST_IPV4:-}"
+            FAMILY=-4
+            PING=${PING4:-}
+            PING_IP=${PING_IPV4:-}
+            SPEEDTEST_IP=${SPEEDTEST_IPV4:-}
+            FETCH_SPEEDTEST=${FETCH_SPEEDTEST_IPV4:-}
         ;;
     esac
 
-    LOCAL_INTERFACE="${INTERFACE:-$DEFAULT_INTERFACE}"
-    LOCAL_METRIC="${METRIC:-$DEFAULT_METRIC}"
+    LOCAL_INTERFACE=${INTERFACE:-$DEFAULT_INTERFACE}
+    LOCAL_METRIC=${METRIC:-$DEFAULT_METRIC}
 
     SHOW_ROUTE="show_routes $FAMILY -g $GATEWAY_IP${LOCAL_INTERFACE:+ -i $LOCAL_INTERFACE}"
 
     get_route "$SPEEDTEST_IP" $GATEWAY_IP $LOCAL_INTERFACE
-    SPEEDTEST_ROUTE="$ROUTE"
+    SPEEDTEST_ROUTE=$ROUTE
 
     get_route "$PING_IP" $GATEWAY_IP $LOCAL_INTERFACE
-    PING_ROUTE="$ROUTE"
+    PING_ROUTE=$ROUTE
 
     get_route default $GATEWAY_IP "$LOCAL_INTERFACE" $LOCAL_METRIC
-    ROUTE="$ROUTE"
+    ROUTE=$ROUTE
 
-    CLEAN_ROUTE="default $GATEWAY_IP "${LOCAL_INTERFACE:-'-'}" $LOCAL_METRIC"
+    CLEAN_ROUTE="default $GATEWAY_IP ${LOCAL_INTERFACE:--} $LOCAL_METRIC"
 }
 
 is_local_interface ()
 {
-    is_not_empty "${1:-}" || return 0
+    is_not_empty "$1" || return 0
     show_interfaces | awk '
         $1 ~ /^'"$1"'$/ {
             found = "yes"
@@ -2478,17 +2446,17 @@ collect_dead_route ()
 {
     case "$FAMILY" in
         -4)
-            DEAD_ROUTES_IPV4="${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE"
+            DEAD_ROUTES_IPV4=${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE
         ;;
         -6)
-            DEAD_ROUTES_IPV6="${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE"
+            DEAD_ROUTES_IPV6=${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE
         ;;
     esac
 }
 
 check_ping ()
 {
-    $TIMEOUT "${PING_TIMEOUT:=3}" $PING -c "${PING_COUNT:=3}" "$@" >/dev/null 2>&1
+    $TIMEOUT ${PING_TIMEOUT:=3} $PING -c ${PING_COUNT:=3} "$@" >/dev/null 2>&1
 }
 
 collect_alive_route ()
@@ -2496,15 +2464,15 @@ collect_alive_route ()
     case "$FAMILY" in
         -4)
             ALIVE_COUNT_IPV4=$((ALIVE_COUNT_IPV4 + 1))
-            ALIVE_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:+$ALIVE_GATEWAYS_IPV4 }$GATEWAY"
-            ALIVE_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:+$ALIVE_ROUTES_IPV4$LF}$ROUTE"
-            ALIVE_CLEAN_ROUTES_IPV4="${ALIVE_CLEAN_ROUTES_IPV4:+$ALIVE_CLEAN_ROUTES_IPV4$LF}$CLEAN_ROUTE"
+            ALIVE_GATEWAYS_IPV4=${ALIVE_GATEWAYS_IPV4:+$ALIVE_GATEWAYS_IPV4 }$GATEWAY
+            ALIVE_ROUTES_IPV4=${ALIVE_ROUTES_IPV4:+$ALIVE_ROUTES_IPV4$LF}$ROUTE
+            ALIVE_CLEAN_ROUTES_IPV4=${ALIVE_CLEAN_ROUTES_IPV4:+$ALIVE_CLEAN_ROUTES_IPV4$LF}$CLEAN_ROUTE
         ;;
         -6)
             ALIVE_COUNT_IPV6=$((ALIVE_COUNT_IPV6 + 1))
-            ALIVE_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:+$ALIVE_GATEWAYS_IPV6 }$GATEWAY"
-            ALIVE_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:+$ALIVE_ROUTES_IPV6$LF}$ROUTE"
-            ALIVE_CLEAN_ROUTES_IPV6="${ALIVE_CLEAN_ROUTES_IPV6:+$ALIVE_CLEAN_ROUTES_IPV6$LF}$CLEAN_ROUTE"
+            ALIVE_GATEWAYS_IPV6=${ALIVE_GATEWAYS_IPV6:+$ALIVE_GATEWAYS_IPV6 }$GATEWAY
+            ALIVE_ROUTES_IPV6=${ALIVE_ROUTES_IPV6:+$ALIVE_ROUTES_IPV6$LF}$ROUTE
+            ALIVE_CLEAN_ROUTES_IPV6=${ALIVE_CLEAN_ROUTES_IPV6:+$ALIVE_CLEAN_ROUTES_IPV6$LF}$CLEAN_ROUTE
         ;;
     esac
 }
@@ -2513,34 +2481,34 @@ collect_alive_metric ()
 {
     case "$FAMILY" in
         -4)
-            ALIVE_METRICS_IPV4="${ALIVE_METRICS_IPV4:+$ALIVE_METRICS_IPV4 }${METRIC:-0}"
+            ALIVE_METRICS_IPV4=${ALIVE_METRICS_IPV4:+$ALIVE_METRICS_IPV4 }${METRIC:-0}
         ;;
         -6)
-            ALIVE_METRICS_IPV6="${ALIVE_METRICS_IPV6:+$ALIVE_METRICS_IPV6 }${METRIC:-0}"
+            ALIVE_METRICS_IPV6=${ALIVE_METRICS_IPV6:+$ALIVE_METRICS_IPV6 }${METRIC:-0}
         ;;
     esac
 }
 
 check_gateways ()
 {
-    is_not_empty "${DEFAULT_GATEWAYS_IPV4:-}${DEFAULT_GATEWAYS_IPV6:-}" ||
-        return
+    RESULT=0
 
-    RESULT="0"
-
-    ALIVE_COUNT_IPV4="0"
-    ALIVE_GATEWAYS_IPV4=""
-    ALIVE_METRICS_IPV4=""
-    ALIVE_ROUTES_IPV4=""
+    ALIVE_COUNT_IPV4=0
+    ALIVE_GATEWAYS_IPV4=
+    ALIVE_METRICS_IPV4=
+    ALIVE_ROUTES_IPV4=
     ALIVE_CLEAN_ROUTES_IPV4=
 
-    ALIVE_COUNT_IPV6="0"
-    ALIVE_GATEWAYS_IPV6=""
-    ALIVE_METRICS_IPV6=""
-    ALIVE_ROUTES_IPV6=""
+    ALIVE_COUNT_IPV6=0
+    ALIVE_GATEWAYS_IPV6=
+    ALIVE_METRICS_IPV6=
+    ALIVE_ROUTES_IPV6=
     ALIVE_CLEAN_ROUTES_IPV6=
 
-    for GATEWAY in ${DEFAULT_GATEWAYS_IPV4:-} ${DEFAULT_GATEWAYS_IPV6:-}
+    is_not_empty "${DEFAULT_GATEWAYS_IPV4:=}${DEFAULT_GATEWAYS_IPV6:=}" ||
+        return
+
+    for GATEWAY in $DEFAULT_GATEWAYS_IPV4 $DEFAULT_GATEWAYS_IPV6
     do
         format_route
         puts
@@ -2550,7 +2518,7 @@ check_gateways ()
             collect_dead_route
             continue
         }
-        if is_equal "$DO_PING" "yes"
+        if is_equal "$DO_PING" yes
         then
             control_route "$FAMILY" replace $PING_ROUTE || return
             is_not_empty "$LOCAL_INTERFACE" ||
@@ -2579,47 +2547,47 @@ check_gateways ()
     is_empty "${DEAD_ROUTES_IPV6:-}" ||
         say "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
 
-    DEAD_ROUTES_IPV4=""
-    DEAD_ROUTES_IPV6=""
-    return "$RESULT"
+    DEAD_ROUTES_IPV4=
+    DEAD_ROUTES_IPV6=
+    return $RESULT
 }
 
 collect_gateway ()
 {
     case "$FAMILY" in
         -4)
-            DEFAULT_GATEWAYS_IPV4="${DEFAULT_GATEWAYS_IPV4:+$DEFAULT_GATEWAYS_IPV4 }$BEST_GATEWAY"
+            DEFAULT_GATEWAYS_IPV4=${DEFAULT_GATEWAYS_IPV4:+$DEFAULT_GATEWAYS_IPV4$SPACE}$BEST_GATEWAY
         ;;
         -6)
-            DEFAULT_GATEWAYS_IPV6="${DEFAULT_GATEWAYS_IPV6:+$DEFAULT_GATEWAYS_IPV6 }$BEST_GATEWAY"
+            DEFAULT_GATEWAYS_IPV6=${DEFAULT_GATEWAYS_IPV6:+$DEFAULT_GATEWAYS_IPV6$SPACE}$BEST_GATEWAY
         ;;
     esac
-    BEST_GATEWAY=""
+    BEST_GATEWAY=
 }
 
 collect_route ()
 {
     case "$FAMILY" in
         -4)
-            DEFAULT_ROUTES_IPV4="${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE"
-            CLEAN_ROUTES_IPV4="${CLEAN_ROUTES_IPV4:+$CLEAN_ROUTES_IPV4$LF}$BEST_CLEAN_ROUTE"
+            DEFAULT_ROUTES_IPV4=${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE
+            CLEAN_ROUTES_IPV4=${CLEAN_ROUTES_IPV4:+$CLEAN_ROUTES_IPV4$LF}$BEST_CLEAN_ROUTE
         ;;
         -6)
-            DEFAULT_ROUTES_IPV6="${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE"
-            CLEAN_ROUTES_IPV6="${CLEAN_ROUTES_IPV6:+$CLEAN_ROUTES_IPV6$LF}$BEST_CLEAN_ROUTE"
+            DEFAULT_ROUTES_IPV6=${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE
+            CLEAN_ROUTES_IPV6=${CLEAN_ROUTES_IPV6:+$CLEAN_ROUTES_IPV6$LF}$BEST_CLEAN_ROUTE
         ;;
     esac
-    BEST_ROUTE=""
+    BEST_ROUTE=
 }
 
 is_empty_alive_metrics ()
 {
     case "$FAMILY" in
         -4)
-            is_empty "${ALIVE_METRICS_IPV4:-}" || return
+            is_empty "$ALIVE_METRICS_IPV4" || return
         ;;
         -6)
-            is_empty "${ALIVE_METRICS_IPV6:-}" || return
+            is_empty "$ALIVE_METRICS_IPV6" || return
         ;;
     esac
 }
@@ -2647,7 +2615,7 @@ is_metric_alive ()
 
 collect_show_route ()
 {
-    SHOW_ROUTES="${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE"
+    SHOW_ROUTES=${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE
 }
 
 is_failed_metric ()
@@ -2662,7 +2630,7 @@ get_time ()
 
 speedtest ()
 {
-    FETCH_TIMEOUT="${SPEEDTEST_TIMEOUT:=15}"
+    FETCH_TIMEOUT=${SPEEDTEST_TIMEOUT:=15}
     START_SPEEDTEST=$(get_time)
     BYTE=$(2>/dev/null $FETCH_SPEEDTEST | wc -c)
     END_SPEEDTEST=$(get_time)
@@ -2674,23 +2642,23 @@ speedtest ()
 
 bit2Human ()
 {
-    BIT="${1:-0}" REMAINS="" SIZE=1
+    BIT=${1:-0} REMAINS= SIZE=1
     while test "$BIT" -ge 1000
     do
         REMAINS=$(( (BIT % 1000) / 10 ))
         if test "$REMAINS" -lt 10
         then
-            REMAINS=".0$REMAINS"
+            REMAINS=.0$REMAINS
         else
-            REMAINS=".$REMAINS"
+            REMAINS=.$REMAINS
         fi
         BIT=$((BIT / 1000))
         SIZE=$((SIZE + 1))
     done
     set -- bit Kbit Mbit Gbit Tbit Ebit Pbit Zbit Ybit
     shift $((SIZE - 1))
-    UNIT="$1"
-    puts "$BIT${REMAINS:-} $UNIT"
+    UNIT=$1
+    puts "$BIT$REMAINS $UNIT"
 }
 
 evaluate_gateway ()
@@ -2699,7 +2667,7 @@ evaluate_gateway ()
     check_ping ${LOCAL_INTERFACE:+-I "$LOCAL_INTERFACE"} "$GATEWAY_IP" &&
     say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}" || {
         say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-        return "$RESULT"
+        return $RESULT
     }
 }
 
@@ -2712,12 +2680,12 @@ evaluate_speed ()
         LOCAL_INTERFACE=$(get_gateway_interface "$SPEEDTEST_IP")
 
     speedtest && {
-        test "$BEST_SPEED" -ge "$BIT" || BEST_SPEED="$BIT"
+        test "$BEST_SPEED" -ge "$BIT" || BEST_SPEED=$BIT
         say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP on '$LOCAL_INTERFACE'"
     } || say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
 
     control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
-    return "$RESULT"
+    return $RESULT
 }
 
 evaluate_host ()
@@ -2733,7 +2701,7 @@ evaluate_host ()
     } || say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
 
     control_route "$FAMILY" del $PING_ROUTE || return
-    return "$RESULT"
+    return $RESULT
 }
 
 add_routes ()
@@ -2755,11 +2723,11 @@ get_current_routes ()
     CURRENT_ROUTES=
     while read SHOW_ROUTE
     do
-        CURRENT_ROUTES="${CURRENT_ROUTES:+$CURRENT_ROUTES$LF}$($SHOW_ROUTE)"
+        CURRENT_ROUTES=${CURRENT_ROUTES:+$CURRENT_ROUTES$LF}$($SHOW_ROUTE)
     done <<EOF
 $SHOW_ROUTES
 EOF
-    is_not_empty "${CURRENT_ROUTES:-}" || return
+    is_not_empty "$CURRENT_ROUTES" || return
 }
 
 get_obsolete_routes ()
@@ -2800,7 +2768,7 @@ $LF
 $CURRENT_ROUTES
 EOF
     )
-    is_not_empty "${REMOVE_ROUTES:-}" || return
+    is_not_empty "$REMOVE_ROUTES" || return
 }
 
 remove_obsolete_routes ()
@@ -2811,14 +2779,14 @@ remove_obsolete_routes ()
 
 refresh_routing_table ()
 {
-    EXIT_CODE="0"
-    is_empty "${DEFAULT_GATEWAYS_IPV4:-}" || {
+    EXIT_CODE=0
+    is_empty "$DEFAULT_GATEWAYS_IPV4" || {
         add_routes -4 "$DEFAULT_ROUTES_IPV4" &&
         get_current_routes &&
         get_obsolete_routes "$CLEAN_ROUTES_IPV4" &&
         remove_obsolete_routes -4 || :
     }
-    is_empty "${DEFAULT_GATEWAYS_IPV6:-}" || {
+    is_empty "$DEFAULT_GATEWAYS_IPV6" || {
         add_routes -6 "$DEFAULT_ROUTES_IPV6" &&
         get_current_routes &&
         get_obsolete_routes "$CLEAN_ROUTES_IPV6" &&
@@ -2828,21 +2796,21 @@ refresh_routing_table ()
 
 update_gateways_state ()
 {
-    DEFAULT_GATEWAYS="${DEFAULT_GATEWAYS_IPV4:--}$LF${DEFAULT_GATEWAYS_IPV6:--}"
+    DEFAULT_GATEWAYS=${DEFAULT_GATEWAYS_IPV4:--}$LF${DEFAULT_GATEWAYS_IPV6:--}
 }
 
 reconcile_gateways ()
 {
-    DEFAULT_GATEWAYS_IPV4="${ALIVE_GATEWAYS_IPV4:-}"
-    DEFAULT_GATEWAYS_IPV6="${ALIVE_GATEWAYS_IPV6:-}"
-    DEFAULT_ROUTES_IPV4="${ALIVE_ROUTES_IPV4:-}"
-    DEFAULT_ROUTES_IPV6="${ALIVE_ROUTES_IPV6:-}"
-    CLEAN_ROUTES_IPV4="${ALIVE_CLEAN_ROUTES_IPV4:-}"
-    CLEAN_ROUTES_IPV6="${ALIVE_CLEAN_ROUTES_IPV6:-}"
-    CURRENT_FAMILY=""
-    CURRENT_METRIC=""
-    BEST_GATEWAY=""
-    BEST_ROUTE=""
+    DEFAULT_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
+    DEFAULT_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
+    DEFAULT_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
+    DEFAULT_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
+    CLEAN_ROUTES_IPV4=$ALIVE_CLEAN_ROUTES_IPV4
+    CLEAN_ROUTES_IPV6=$ALIVE_CLEAN_ROUTES_IPV6
+    CURRENT_FAMILY=
+    CURRENT_METRIC=
+    BEST_GATEWAY=
+    BEST_ROUTE=
     BEST_SPEED=0
     SHOW_ROUTES=
 
@@ -2855,9 +2823,9 @@ reconcile_gateways ()
             puts
             say "testing IPv${FAMILY#-} route: '$ROUTE'"
 
-            is_equal "${CURRENT_FAMILY:-}" "$FAMILY" &&
-            is_equal "${CURRENT_METRIC:-}" "${METRIC:-0}" || {
-                is_empty "${BEST_ROUTE:-}" || {
+            is_equal "$CURRENT_FAMILY" "$FAMILY" &&
+            is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
+                is_empty "$BEST_ROUTE" || {
                     collect_gateway
                     collect_route
                     BEST_SPEED=0
@@ -2866,8 +2834,8 @@ reconcile_gateways ()
                     say "skipping gateway: active route already found with metric '${METRIC:-0}'"
                     continue
                 }
-                CURRENT_FAMILY="$FAMILY"
-                CURRENT_METRIC="${METRIC:-0}"
+                CURRENT_FAMILY=$FAMILY
+                CURRENT_METRIC=${METRIC:-0}
             }
 
             is_local_interface "$LOCAL_INTERFACE" || {
@@ -2892,31 +2860,31 @@ reconcile_gateways ()
                     collect_alive_metric
                     CURRENT_METRIC=
                 fi && {
-                    BEST_GATEWAY="$GATEWAY"
-                    BEST_ROUTE="$ROUTE"
-                    BEST_CLEAN_ROUTE="$CLEAN_ROUTE"
+                    BEST_GATEWAY=$GATEWAY
+                    BEST_ROUTE=$ROUTE
+                    BEST_CLEAN_ROUTE=$CLEAN_ROUTE
                 } || :
             else
                 collect_dead_route
             fi
         done
 
-        is_empty "${BEST_ROUTE:-}" || {
+        is_empty "$BEST_ROUTE" || {
             collect_gateway
             collect_route
             break
         }
 
-        is_empty "${DEFAULT_GATEWAYS_IPV4:-}${DEFAULT_GATEWAYS_IPV6:-}" || break
+        is_empty "$DEFAULT_GATEWAYS_IPV4$DEFAULT_GATEWAYS_IPV6" || break
 
         puts
         say "WARNING: no alive gateways found, retrying in 1s..."
-        is_diff "$STATE" "slave" || return
+        is_diff $STATE slave || return
 
         sleep 1
     done
 
-    is_equal "$ROLE" "master-advisor" || refresh_routing_table
+    is_equal "$ROLE" master-advisor || refresh_routing_table
     update_gateways_state
 }
 
@@ -2930,7 +2898,7 @@ say_gateways_state ()
 
 save_gateways_state ()
 {
-    case "${SERVE_GATEWAYS:-}" in
+    case "$SERVE_GATEWAYS" in
         "" | serve_netcat)
             return
         ;;
@@ -2954,7 +2922,7 @@ is_vrrp_master ()
 
 is_process_alive ()
 {
-    is_not_empty "${1:-}" &&
+    is_not_empty "$1" &&
     is_dir "/proc/$1"
 }
 
@@ -2993,10 +2961,10 @@ serve_telnetd ()
 
 stop_serve_gateways ()
 {
-    if is_process_alive "${GATEWAY_SERVER_PID:-}"
+    if is_process_alive "$GATEWAY_SERVER_PID"
     then
         kill "$GATEWAY_SERVER_PID" 2>/dev/null || :
-        GATEWAY_SERVER_PID=""
+        GATEWAY_SERVER_PID=
         say "gateway server stopped"
     fi
 }
@@ -3022,7 +2990,7 @@ serve_gateways ()
         then
             say "gateway server successfully started on port $VIP_PORT"
         else
-            GATEWAY_SERVER_PID=""
+            GATEWAY_SERVER_PID=
             say "error: gateway server failed to start (check system logs)"
         fi >&2
     }
@@ -3098,7 +3066,7 @@ fetch_gateways ()
     puts
     say -n "attempting to fetch gateway state from master ($VIP)..."
     FETCH_TIMEOUT=1
-    while is_diff $COUNT $RETRIES
+    while is_diff "$COUNT" "$RETRIES"
     do
         FETCHED_GATEWAYS=$($FETCH_GATEWAYS) && {
             SUCCESS=0
@@ -3106,47 +3074,47 @@ fetch_gateways ()
         } || COUNT=$((COUNT + 1))
     done 2>/dev/null
 
-    is_equal $SUCCESS 0 && say -p " [ OK ]" || {
+    is_equal "$SUCCESS" 0 && say -p " [ OK ]" || {
         say -p " [ ERROR ]"
         say "error: ${FETCHED_GATEWAYS:-failed to fetch alive gateways list}"
-        FETCHED_GATEWAYS=""
+        FETCHED_GATEWAYS=
         return 1
     } >&2
 
-    is_not_empty "${FETCHED_GATEWAYS:-}" || {
+    is_not_empty "$FETCHED_GATEWAYS" || {
         say "error: received empty or invalid gateway state from master ($VIP)"
         return 1
     } >&2
 
-    FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS%$LF*}"
-    FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS#*$LF}"
-    FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS_IPV4#-}"
-    FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS_IPV6#-}"
+    FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS%$LF*}
+    FETCHED_GATEWAYS_IPV6=${FETCHED_GATEWAYS#*$LF}
+    FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS_IPV4#-}
+    FETCHED_GATEWAYS_IPV6=${FETCHED_GATEWAYS_IPV6#-}
 
     say "received remote state from master ($VIP):"
     say "  IPv4 [${FETCHED_GATEWAYS_IPV4:-no alive gateways provided}]"
     say "  IPv6 [${FETCHED_GATEWAYS_IPV6:-no alive gateways provided}]"
 
     is_equal "$IGNOREMETRIC" no || {
-        FETCHED_GATEWAYS_IPV4="${FETCHED_GATEWAYS_IPV4%%$SPACE*}"
-        FETCHED_GATEWAYS_IPV6="${FETCHED_GATEWAYS_IPV6%%$SPACE*}"
+        FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS_IPV4%%$SPACE*}
+        FETCHED_GATEWAYS_IPV6=${FETCHED_GATEWAYS_IPV6%%$SPACE*}
 
         split_gateway "$FETCHED_GATEWAYS_IPV4"
-        FETCHED_GATEWAYS_IPV4="${GATEWAY_IP:+$INTERFACE=$GATEWAY_IP}"
+        FETCHED_GATEWAYS_IPV4=${GATEWAY_IP:+$INTERFACE=$GATEWAY_IP}
 
         split_gateway "$FETCHED_GATEWAYS_IPV6"
-        FETCHED_GATEWAYS_IPV6="${GATEWAY_IP:+$INTERFACE=$GATEWAY_IP}"
+        FETCHED_GATEWAYS_IPV6=${GATEWAY_IP:+$INTERFACE=$GATEWAY_IP}
 
-        FETCHED_GATEWAYS="${FETCHED_GATEWAYS_IPV4:--}$LF${FETCHED_GATEWAYS_IPV6:--}"
+        FETCHED_GATEWAYS=${FETCHED_GATEWAYS_IPV4:--}$LF${FETCHED_GATEWAYS_IPV6:--}
     }
 
-    is_not_empty "${FETCHED_GATEWAYS_IPV4:-}${FETCHED_GATEWAYS_IPV6:-}" ||
-        FETCHED_GATEWAYS=""
+    is_not_empty "$FETCHED_GATEWAYS_IPV4$FETCHED_GATEWAYS_IPV6" ||
+        FETCHED_GATEWAYS=
 }
 
 sync_gateways ()
 {
-    is_not_empty "${FETCHED_GATEWAYS:-}" || return 0
+    is_not_empty "$FETCHED_GATEWAYS" || return 0
 
     is_diff "$FETCHED_GATEWAYS" "${DEFAULT_GATEWAYS:-}" || {
         say "local routing state is already up to date"
@@ -3155,12 +3123,12 @@ sync_gateways ()
     }
     say "applying new gateway configuration from master ($VIP)\n"
 
-    DEFAULT_GATEWAYS_IPV4=""
-    DEFAULT_GATEWAYS_IPV6=""
-    DEFAULT_ROUTES_IPV4=""
-    DEFAULT_ROUTES_IPV6=""
+    DEFAULT_GATEWAYS_IPV4=
+    DEFAULT_GATEWAYS_IPV6=
+    DEFAULT_ROUTES_IPV4=
+    DEFAULT_ROUTES_IPV6=
 
-    for GATEWAY in ${FETCHED_GATEWAYS_IPV4:-} ${FETCHED_GATEWAYS_IPV6:-}
+    for GATEWAY in $FETCHED_GATEWAYS_IPV4 $FETCHED_GATEWAYS_IPV6
     do
         format_route
         collect_show_route
@@ -3169,9 +3137,9 @@ sync_gateways ()
             say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
             continue
         }
-        BEST_GATEWAY="$GATEWAY"
-        BEST_ROUTE="$ROUTE"
-        BEST_CLEAN_ROUTE="$CLEAN_ROUTE"
+        BEST_GATEWAY=$GATEWAY
+        BEST_ROUTE=$ROUTE
+        BEST_CLEAN_ROUTE=$CLEAN_ROUTE
         collect_gateway
         collect_route
     done
@@ -3189,13 +3157,13 @@ run_single_mode ()
         check_gateways || reconcile_gateways
         say_gateways_state
         say "next check cycle in: '$HUMAN_INTERVAL'"
-        sleep "$CHECK_INTERVAL"
+        sleep $CHECK_INTERVAL
     done
 }
 
 run_master_mode ()
 {
-    GATEWAY_SERVER_PID=""
+    GATEWAY_SERVER_PID=
     puts
     set_state "$ROLE"
     while loop
@@ -3206,7 +3174,7 @@ run_master_mode ()
         } && serve_gateways || stop_serve_gateways
         say_gateways_state
         say "next check cycle in: '$HUMAN_INTERVAL'"
-        sleep "$CHECK_INTERVAL"
+        sleep $CHECK_INTERVAL
     done
 }
 
@@ -3227,7 +3195,7 @@ run_slave_mode ()
             slave)
                 fetch_gateways && sync_gateways || {
                     say "master unreachable"
-                    set_state "slave-single"
+                    set_state slave-single
                     false
                 }
             ;;
@@ -3238,7 +3206,7 @@ run_slave_mode ()
                 } && {
                     puts
                     say "master reachable"
-                    set_state "slave"
+                    set_state slave
                     sync_gateways
                 }
             ;;
@@ -3249,13 +3217,13 @@ run_slave_mode ()
             }
         }
         say "next check cycle in: '$HUMAN_INTERVAL'"
-        sleep "$CHECK_INTERVAL"
+        sleep $CHECK_INTERVAL
     done
 }
 
 run_cluster_mode ()
 {
-    GATEWAY_SERVER_PID=""
+    GATEWAY_SERVER_PID=
     while loop
     do
         if is_vrrp_master
@@ -3274,7 +3242,7 @@ run_cluster_mode ()
             case "$STATE" in
                 cluster-slave | cluster-master | init)
                     is_equal "$STATE" cluster-slave || {
-                        is_diff "$STATE" cluster-master || stop_serve_gateways
+                        is_diff $STATE cluster-master || stop_serve_gateways
                         puts
                         say "virtual IP not found on this host: '$VIP'"
                         set_state cluster-slave
@@ -3301,7 +3269,7 @@ run_cluster_mode ()
             }
         fi
         say "next check cycle in: '$HUMAN_INTERVAL'"
-        sleep "$CHECK_INTERVAL"
+        sleep $CHECK_INTERVAL
     done
 }
 
@@ -3310,7 +3278,7 @@ main ()
     is_root_access ||
         die "error: root privileges are required to manage routing tables."
 
-    set_state "init"
+    set_state init
     setup_core_env
     setup_defaults
 
