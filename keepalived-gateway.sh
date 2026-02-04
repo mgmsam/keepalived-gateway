@@ -880,46 +880,52 @@ resolve_dependencies ()
         }
     '
     AWK_NATURAL_SORT_FUNC='
-        function get_nat_key(s, res, i, c, n) {
-            res = ""
+        function get_natural_key(s, result, i, c, n) {
+            result = ""
             i = 1
+
             while (i <= length(s)) {
                 c = substr(s, i, 1)
+
                 if (c ~ /[0-9]/) {
                     n = ""
                     while (i <= length(s) && substr(s, i, 1) ~ /[0-9]/) {
                         n = n substr(s, i, 1)
                         i++
                     }
-                    res = res sprintf("%010d", n)
-                }
-                else {
-                    res = res c
+                    result = result sprintf("%010d", n)
+                } else {
+                    result = result c
                     i++
                 }
             }
-            return res
+            return result
         }
     '
     AWK_NATURAL_SORT='
         if (count == 0)
             exit 0
+
         for (i = 1; i <= count; i++)
-            keys[i] = get_nat_key(list[i])
+            keys[i] = get_natural_key(list[i])
+
         for (i = 2; i <= count; i++) {
             for (j = i; j > 1 && keys[j-1] > keys[j]; j--) {
-                tmp = list[j]
-                list[j] = list[j-1]
+                tmp       = list[j]
+                list[j]   = list[j-1]
                 list[j-1] = tmp
-                tk = keys[j]
-                keys[j] = keys[j-1]
+                tk        = keys[j]
+                keys[j]   = keys[j-1]
                 keys[j-1] = tk
             }
         }
+
         for (i = 1; i <= count; i++)
             print list[i]
+
         for (i in list)
             delete list[i]
+
         for (i in keys)
             delete keys[i]
     '
@@ -943,27 +949,28 @@ resolve_dependencies ()
                 split($0, line, "addr:")
                 split(line[2], ip_mask_zone, " ")
                 address = ip_mask_zone[1]
-            }
-            else {
+            } else {
                 address = $2
             }
 
             if (address) {
                 split(address, ip, "[/%]")
                 value = ip[1]
+
                 if (current_family == 4) {
                     if (!seen4[value]) {
-                        seen4[value] = 1
+                        seen4[value]    = 1
                         list4[++count4] = value
                     }
                 } else {
                     if (!seen6[value]) {
-                        seen6[value] = 1
+                        seen6[value]    = 1
                         list6[++count6] = value
                     }
                 }
             }
         }
+
         END {
             if (substr(family, 1, 1) == "6") {
                 if (count6 > 0) {
@@ -972,6 +979,7 @@ resolve_dependencies ()
                         list[i] = list6[i]
                         '"$AWK_NATURAL_SORT"'
                 }
+
                 if (count4 > 0) {
                     count = count4
                     for (i in list4)
@@ -985,6 +993,7 @@ resolve_dependencies ()
                         list[i] = list4[i]
                         '"$AWK_NATURAL_SORT"'
                 }
+
                 if (count6 > 0) {
                     count = count6
                     for (i in list6)
@@ -1009,12 +1018,13 @@ resolve_dependencies ()
 
             destination = $1
             gateway     = $2
-            shift = (idx_hop ? 1 : 0)
-            metric  = (idx_metric ? $(idx_metric - shift) : "0")
+            shift       = (idx_hop ? 1 : 0)
+            metric      = (idx_metric ? $(idx_metric - shift) : "0")
             interface   = $NF
 
             if (find_destination != "") {
                 match_destination = "no"
+
                 if (find_destination == destination) {
                     match_destination =  "yes"
                 } else if ((find_destination == "0.0.0.0" || find_destination == "::/0") && (destination == "default")) {
@@ -1022,6 +1032,7 @@ resolve_dependencies ()
                 } else if ((find_destination == "default") && (destination == "0.0.0.0" || destination == "::/0")) {
                     match_destination =  "yes"
                 }
+
                 if (match_destination == "no")
                     next
             }
@@ -1171,21 +1182,23 @@ resolve_dependencies ()
             shift $SHIFT
             run_ip route show $DESTINATION "$@" | awk '
                 BEGIN {
-                    gateway = "'"$GATEWAY_IP"'"
+                    gateway   = "'"$GATEWAY_IP"'"
                     interface = "'"$NET_DEVICE"'"
                 }
+
                 {
                     if (gateway == "" && interface == "") {
                         print $0
                         next
                     }
 
-                    current_gateway = ""
+                    current_gateway   = ""
                     current_interface = ""
 
                     for (i = 1; i < NF; i++) {
                         if ($i == "via")
                             current_gateway = $(i+1)
+
                         if ($i == "dev")
                             current_interface = $(i+1)
                     }
@@ -1269,9 +1282,11 @@ resolve_dependencies ()
             $1 !~ /^tcp|^udp/ {
                 next
             }
+
             $1 ~ /^tcp/ && $6 !~ /LISTEN/ {
                 next
             }
+
             {
                 value = $4
                 while (sub(/.*[:.]/, "", value))
@@ -1304,9 +1319,11 @@ resolve_dependencies ()
                     $1 !~ /^tcp|^udp/ {
                         next
                     }
+
                     {
                         value = $5
                         sub(/.*:/, "", value)
+
                         if (value ~ /^[0-9]+$/) {
                             '"$AWK_UNIQUE_COLLECT"'
                         }
@@ -1340,16 +1357,20 @@ resolve_dependencies ()
                             h = tolower(h)
                             sub(/^0x/, "", h)
                             d = 0
+
                             for (i = 1; i <= length(h); i++) {
                                 x = index("0123456789abcdef", substr(h, i, 1)) - 1
                                 d = d * 16 + x
                             }
                             return d
                         }
+
                         $4 ~ /^'"$STATE_FILTER"'$/ && $2 ~ /:[0-9A-F]+$/ {
                             sub(/^[^:]+:/, "", $2)
                             $1 = hex2dec($2)
-                            if ($1 ~ /^[0-9]+$/) print $1
+
+                            if ($1 ~ /^[0-9]+$/)
+                                print $1
                         }
                     ' "$i"
                 done | awk '
@@ -1715,6 +1736,7 @@ resolve_fqdn ()
         IPV4=$($TIMEOUT 5 $PING4 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
                 gsub(/[][)(:]/, " ", $0)
+
                 for (ip=1; ip<=NF; ip++) {
                     if ($ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
                         print $ip
@@ -1728,8 +1750,10 @@ resolve_fqdn ()
         IPV6=$($TIMEOUT 5 $PING6 -c 1 "$1" 2>/dev/null | awk '
             /PING/ {
                 gsub(/[][)(]/, " ")
+
                 for (ip=1; ip<=NF; ip++) {
                     sub(/:$/, "", $ip)
+
                     if ($ip ~ /^[0-9a-fA-F:]+$/ && $ip ~ /:/) {
                         print $ip
                         exit
@@ -1777,33 +1801,41 @@ optimize_gateways ()
         BEGIN {
             FS = "="
         }
+
         {
             interface = $1
-            gateway = $2
-            metric = ($3 == "" ? 0 : $3)
+            gateway   = $2
+            metric    = ($3 == "" ? 0 : $3)
+
             key = interface "=" gateway
+
             if (!(key in best_metric) || metric < best_metric[key]) {
                 best_metric[key] = metric
-                pos[key] = $0
+                pos[key]         = $0
             }
+
             if (!(key in seen)) {
                 keys[++count] = key
-                seen[key] = 1
+                seen[key]     = 1
             }
         }
+
         END {
             for (i = 2; i <= count; i++) {
                 for (j = i; j > 1 && best_metric[keys[j-1]] > best_metric[keys[j]]; j--) {
-                    tmp = keys[j]
-                    keys[j] = keys[j-1]
+                    tmp       = keys[j]
+                    keys[j]   = keys[j-1]
                     keys[j-1] = tmp
                 }
             }
             gateways = ""
+
             for (i = 1; i <= count; i++) {
                 gateways = (gateways == "" ? "" : gateways " ") pos[keys[i]]
             }
-            if (gateways != "") print gateways
+
+            if (gateways != "")
+                print gateways
         }
     ' <<EOF
 $1
@@ -1951,6 +1983,7 @@ is_port_free ()
             found = "yes"
             exit
         }
+
         END {
             if (found == "yes")
                 exit 1
@@ -2396,6 +2429,7 @@ is_local_interface ()
             found = "yes"
             exit
         }
+
         END {
             if (found == "yes")
                 exit 0
@@ -2700,7 +2734,7 @@ get_obsolete_routes ()
             gsub(/via |gw |dev |metric |'\''/, "")
             if ($1 == "0.0.0.0" || $1 == "::/0")
                 $1 = "default"
-            $1 = $1
+            $1  = $1
             key = $1 " " $2 " " $4
         }
 
@@ -2966,15 +3000,18 @@ strip_headers ()
         BEGIN {
             body = 0
         }
+
         {
             gsub(/\r/, "")
             if (!body && $0 ~ /^[[:space:]]*$/) {
                 body = 1
                 next
             }
+
             if (body) {
                 if ($0 ~ /^\377/)
                     next
+
                 if ($0 !~ /^[[:space:]]*$/) {
                     if (first_line_done)
                         printf "\n"
