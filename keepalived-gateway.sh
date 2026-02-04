@@ -2423,7 +2423,6 @@ format_route ()
 
 is_local_interface ()
 {
-    is_not_empty "$1" || return 0
     show_interfaces | awk '
         $1 ~ /^'"$1"'$/ {
             found = "yes"
@@ -2436,6 +2435,18 @@ is_local_interface ()
             exit 1
         }
     '
+}
+
+check_interface_state ()
+{
+    is_not_empty "$LOCAL_INTERFACE" || return 0
+    say -n "probing interface: '$LOCAL_INTERFACE' ..."
+    is_local_interface "$LOCAL_INTERFACE" || {
+        say -p " [ FAILED ]"
+        say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
+        return $RESULT
+    }
+    say -p " [ OK ]"
 }
 
 collect_dead_route ()
@@ -2485,6 +2496,19 @@ collect_alive_metric ()
     esac
 }
 
+report_dead_routes ()
+{
+    is_empty "${DEAD_ROUTES_IPV4:-}" || {
+        puts
+        say 1 "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
+    }
+
+    is_empty "${DEAD_ROUTES_IPV6:-}" || {
+        puts
+        say 1 "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
+    }
+}
+
 check_gateways ()
 {
     RESULT=0
@@ -2509,11 +2533,8 @@ check_gateways ()
         format_route
         puts
         say "checking active IPv${FAMILY#-} route: '$ROUTE'"
-        is_local_interface "$LOCAL_INTERFACE" || {
-            say "interface '$LOCAL_INTERFACE' is not available for gateway '$GATEWAY_IP'"
-            collect_dead_route
-            continue
-        }
+
+        check_interface_state || continue
 
         evaluate_gateway && {
             if is_equal "$DO_PING" yes
@@ -2526,18 +2547,7 @@ check_gateways ()
         } || collect_dead_route
     done
 
-    is_empty "${DEAD_ROUTES_IPV4:-}" || {
-        puts
-        say 1 "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
-    }
-
-    is_empty "${DEAD_ROUTES_IPV6:-}" || {
-        puts
-        say 1 "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
-    }
-
-    DEAD_ROUTES_IPV4=
-    DEAD_ROUTES_IPV6=
+    report_dead_routes
     return $RESULT
 }
 
@@ -2789,18 +2799,23 @@ update_gateways_state ()
 
 reconcile_gateways ()
 {
-    DEFAULT_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
-    DEFAULT_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
-    DEFAULT_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
-    DEFAULT_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
     CLEAN_ROUTES_IPV4=$ALIVE_CLEAN_ROUTES_IPV4
+    DEFAULT_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
+    DEFAULT_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
+    DEAD_ROUTES_IPV4=
+
     CLEAN_ROUTES_IPV6=$ALIVE_CLEAN_ROUTES_IPV6
+    DEFAULT_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
+    DEFAULT_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
+    DEAD_ROUTES_IPV6=
+
     CURRENT_FAMILY=
     CURRENT_METRIC=
+    SHOW_ROUTES=
+
     BEST_GATEWAY=
     BEST_ROUTE=
     BEST_SPEED=0
-    SHOW_ROUTES=
 
     while loop
     do
@@ -2826,8 +2841,8 @@ reconcile_gateways ()
                 CURRENT_METRIC=${METRIC:-0}
             }
 
-            is_local_interface "$LOCAL_INTERFACE" || {
-                say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
+            check_interface_state || {
+                collect_dead_route
                 continue
             }
 
@@ -2862,6 +2877,7 @@ reconcile_gateways ()
             collect_route
             break
         }
+        report_dead_routes
 
         is_empty "$DEFAULT_GATEWAYS_IPV4$DEFAULT_GATEWAYS_IPV6" || break
 
@@ -3115,21 +3131,20 @@ sync_gateways ()
     say "applying new gateway configuration from master ($VIP)\n"
 
     DEFAULT_GATEWAYS_IPV4=
-    DEFAULT_GATEWAYS_IPV6=
     DEFAULT_ROUTES_IPV4=
+    DEAD_ROUTES_IPV4=
+
+    DEFAULT_GATEWAYS_IPV6=
     DEFAULT_ROUTES_IPV6=
+    DEAD_ROUTES_IPV6=
 
     for GATEWAY in $FETCHED_GATEWAYS_IPV4 $FETCHED_GATEWAYS_IPV6
     do
         format_route
         collect_show_route
-        say -n "configuring IPv${FAMILY#-} route: '$ROUTE' ..."
-        is_local_interface "$LOCAL_INTERFACE" || {
-            say -p " [ FAILED ]"
-            say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
-            continue
-        }
-        say -p " [ OK ]"
+        puts
+        say "configuring IPv${FAMILY#-} route: '$ROUTE'"
+        check_interface_state || continue
         BEST_GATEWAY=$GATEWAY
         BEST_ROUTE=$ROUTE
         BEST_CLEAN_ROUTE=$CLEAN_ROUTE
@@ -3137,6 +3152,7 @@ sync_gateways ()
         collect_route
     done
 
+    report_dead_routes
     refresh_routing_table
     update_gateways_state
 }
