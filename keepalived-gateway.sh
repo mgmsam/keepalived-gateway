@@ -2545,32 +2545,28 @@ check_gateways ()
     return $RESULT
 }
 
-collect_default_gateway ()
+collect_show_route ()
 {
-    case "$FAMILY" in
-        -4)
-            DEFAULT_GATEWAYS_IPV4=${DEFAULT_GATEWAYS_IPV4:+$DEFAULT_GATEWAYS_IPV4$SPACE}$BEST_GATEWAY
-        ;;
-        -6)
-            DEFAULT_GATEWAYS_IPV6=${DEFAULT_GATEWAYS_IPV6:+$DEFAULT_GATEWAYS_IPV6$SPACE}$BEST_GATEWAY
-        ;;
-    esac
-    BEST_GATEWAY=
+    SHOW_ROUTES=${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE
 }
 
 collect_route ()
 {
     case "$FAMILY" in
         -4)
-            DEFAULT_ROUTES_IPV4=${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE
             CLEAN_ROUTES_IPV4=${CLEAN_ROUTES_IPV4:+$CLEAN_ROUTES_IPV4$LF}$BEST_CLEAN_ROUTE
+            DEFAULT_GATEWAYS_IPV4=${DEFAULT_GATEWAYS_IPV4:+$DEFAULT_GATEWAYS_IPV4$SPACE}$BEST_GATEWAY
+            DEFAULT_ROUTES_IPV4=${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE
         ;;
         -6)
-            DEFAULT_ROUTES_IPV6=${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE
             CLEAN_ROUTES_IPV6=${CLEAN_ROUTES_IPV6:+$CLEAN_ROUTES_IPV6$LF}$BEST_CLEAN_ROUTE
+            DEFAULT_GATEWAYS_IPV6=${DEFAULT_GATEWAYS_IPV6:+$DEFAULT_GATEWAYS_IPV6$SPACE}$BEST_GATEWAY
+            DEFAULT_ROUTES_IPV6=${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE
         ;;
     esac
+    BEST_GATEWAY=
     BEST_ROUTE=
+    BEST_SPEED=0
 }
 
 is_empty_alive_metrics ()
@@ -2604,11 +2600,6 @@ is_metric_alive ()
         ;;
     esac
     return 1
-}
-
-collect_show_route ()
-{
-    SHOW_ROUTES=${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE
 }
 
 is_failed_metric ()
@@ -2822,11 +2813,7 @@ reconcile_gateways ()
 
             is_equal "$CURRENT_FAMILY" "$FAMILY" &&
             is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
-                is_empty "$BEST_ROUTE" || {
-                    collect_default_gateway
-                    collect_route
-                    BEST_SPEED=0
-                }
+                is_empty "$BEST_ROUTE" || collect_route
                 is_empty_alive_metrics || is_failed_metric || {
                     say "skipping gateway: active route already found with metric '${METRIC:-0}'"
                     continue
@@ -2840,8 +2827,7 @@ reconcile_gateways ()
                 continue
             }
 
-            if evaluate_gateway
-            then
+            evaluate_gateway && {
                 if is_equal "$DO_SPEEDTEST" yes
                 then
                     evaluate_speed || {
@@ -2857,20 +2843,14 @@ reconcile_gateways ()
                     collect_alive_metric
                     CURRENT_METRIC=
                 fi && {
+                    BEST_CLEAN_ROUTE=$CLEAN_ROUTE
                     BEST_GATEWAY=$GATEWAY
                     BEST_ROUTE=$ROUTE
-                    BEST_CLEAN_ROUTE=$CLEAN_ROUTE
-                } || :
-            else
-                collect_dead_route
-            fi
+                }
+            } || collect_dead_route
         done
+        is_empty "$BEST_ROUTE" || collect_route
 
-        is_empty "$BEST_ROUTE" || {
-            collect_default_gateway
-            collect_route
-            break
-        }
         report_dead_routes
 
         is_empty "$DEFAULT_GATEWAYS_IPV4$DEFAULT_GATEWAYS_IPV6" || break
@@ -3142,7 +3122,6 @@ sync_gateways ()
         BEST_GATEWAY=$GATEWAY
         BEST_ROUTE=$ROUTE
         BEST_CLEAN_ROUTE=$CLEAN_ROUTE
-        collect_default_gateway
         collect_route
     done
 
