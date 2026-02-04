@@ -2029,7 +2029,7 @@ resolve_server ()
         say -n "environment: role '$ROLE': server '$COMMAND':"
         if type "$COMMAND" >/dev/null 2>&1
         then
-            say -n -p " probing server IPv${VIP_FAMILY#-} capability..."
+            say -n -p " probing server IPv${VIP_FAMILY#-} capability ..."
             case "$COMMAND" in
                 nc)
                     detect_netcat_server &&
@@ -2163,7 +2163,7 @@ probe_speedtest_fetcher ()
 {
     is_not_empty "$FETCH_SPEEDTEST_IPV4" || {
         is_empty "$SPEEDTEST_IPV4" || {
-            say 0 -n "$PREFIX: probing speedtest IPv4 capability..."
+            say 0 -n "$PREFIX: probing speedtest IPv4 capability ..."
             $1 "$SPEEDTEST_SCHEME" 127.0.0.1 IPv4 && {
                 FETCH_SPEEDTEST_IPV4="$2 $SPEEDTEST_TARGET"
                 say -p " [ OK ]"
@@ -2172,7 +2172,7 @@ probe_speedtest_fetcher ()
     }
     is_not_empty "$FETCH_SPEEDTEST_IPV6" || {
         is_empty "$SPEEDTEST_IPV6" || {
-            say 0 -n "$PREFIX: probing speedtest IPv6 capability..."
+            say 0 -n "$PREFIX: probing speedtest IPv6 capability ..."
             $1 "$SPEEDTEST_SCHEME" [::1] IPv6 && {
                 FETCH_SPEEDTEST_IPV6="$2 $SPEEDTEST_TARGET"
                 say -p " [ OK ]"
@@ -2188,12 +2188,12 @@ probe_gateway_fetcher ()
             is_not_empty "$FETCH_GATEWAYS" || {
                 if is_equal "$VIP_FAMILY" -4
                 then
-                    say 0 -n "$PREFIX: probing gateway sync IPv4 capability..."
+                    say 0 -n "$PREFIX: probing gateway sync IPv4 capability ..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
                     is_not_empty "$FETCH_SPEEDTEST_IPV4" ||
                         $1 http 127.0.0.1 IPv4
                 else
-                    say 0 -n "$PREFIX: probing gateway sync IPv6 capability..."
+                    say 0 -n "$PREFIX: probing gateway sync IPv6 capability ..."
                     is_equal "${SPEEDTEST_SCHEME:-}" http &&
                     is_not_empty "$FETCH_SPEEDTEST_IPV6" ||
                         $1 http [::1] IPv6
@@ -2480,34 +2480,27 @@ check_gateways ()
             collect_dead_route
             continue
         }
-        if is_equal "$DO_PING" yes
-        then
-            control_route "$FAMILY" replace $PING_ROUTE || return
-            is_not_empty "$LOCAL_INTERFACE" ||
-                LOCAL_INTERFACE=$(get_gateway_interface "$PING_IP")
-            check_ping -I "$LOCAL_INTERFACE" "$PING_IP" || {
-                control_route "$FAMILY" del $PING_ROUTE || return
-                say "host '$PING_HOST' is unreachable via route '$ROUTE'"
-                collect_dead_route
-                continue
+
+        evaluate_gateway && {
+            if is_equal "$DO_PING" yes
+            then
+                evaluate_host
+            fi && {
+                collect_alive_route
+                collect_alive_metric
             }
-            control_route "$FAMILY" del $PING_ROUTE || return
-        else
-            check_ping ${LOCAL_INTERFACE:+-I "$LOCAL_INTERFACE"} "$GATEWAY_IP" || {
-                say "gateway '$GATEWAY_IP' is unreachable${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-                collect_dead_route
-                continue
-            }
-        fi
-        say "alive active route: '$ROUTE'"
-        collect_alive_route
-        collect_alive_metric
+        } || collect_dead_route
     done
 
-    is_empty "${DEAD_ROUTES_IPV4:-}" ||
-        say "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
-    is_empty "${DEAD_ROUTES_IPV6:-}" ||
-        say "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
+    is_empty "${DEAD_ROUTES_IPV4:-}" || {
+        puts
+        say 1 "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
+    }
+
+    is_empty "${DEAD_ROUTES_IPV6:-}" || {
+        puts
+        say 1 "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
+    }
 
     DEAD_ROUTES_IPV4=
     DEAD_ROUTES_IPV6=
@@ -2625,17 +2618,17 @@ bit2Human ()
 
 evaluate_gateway ()
 {
-    say "probing gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
+    say -n "probing gateway: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'} ..."
     check_ping ${LOCAL_INTERFACE:+-I "$LOCAL_INTERFACE"} "$GATEWAY_IP" &&
-    say "reachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}" || {
-        say "unreachable gateway address: '$GATEWAY_IP'${LOCAL_INTERFACE:+ on '$LOCAL_INTERFACE'}"
-        return $RESULT
-    }
+        say -p " [ reachable ]" || {
+            say -p " [ unreachable ]"
+            return $RESULT
+        }
 }
 
 evaluate_speed ()
 {
-    say "measuring speed to host: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+    say -n "speedtest to: '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE' ..."
     control_route "$FAMILY" replace $SPEEDTEST_ROUTE || return
 
     is_not_empty "$LOCAL_INTERFACE" ||
@@ -2643,8 +2636,8 @@ evaluate_speed ()
 
     speedtest && {
         test "$BEST_SPEED" -ge "$BIT" || BEST_SPEED=$BIT
-        say "measured speed: $(bit2Human "$BIT")/s for gateway: '$GATEWAY_IP on '$LOCAL_INTERFACE'"
-    } || say "failed to measure speed from '$SPEEDTEST_HOST' using route '$SPEEDTEST_ROUTE'"
+        say -p " [ $(bit2Human "$BIT")/s ]"
+    } || say -p " [ FAILED ]"
 
     control_route "$FAMILY" del $SPEEDTEST_ROUTE || return
     return $RESULT
@@ -2652,15 +2645,14 @@ evaluate_speed ()
 
 evaluate_host ()
 {
-    say "probing host address: '$PING_HOST' using route '$PING_ROUTE'"
+    say -n "probing ping host: '$PING_HOST' using route '$PING_ROUTE' ..."
     control_route "$FAMILY" replace $PING_ROUTE || return
 
     is_not_empty "$LOCAL_INTERFACE" ||
         LOCAL_INTERFACE=$(get_gateway_interface "$PING_IP")
 
-    check_ping -I "$LOCAL_INTERFACE" "$PING_IP" && {
-        say "reachable host address: '$PING_HOST' using route '$PING_ROUTE'"
-    } || say "unreachable host address: '$PING_HOST' using route '$PING_ROUTE'"
+    check_ping -I "$LOCAL_INTERFACE" "$PING_IP" && say -p " [ reachable ]" ||
+                                                   say -p " [ unreachable ]"
 
     control_route "$FAMILY" del $PING_ROUTE || return
     return $RESULT
@@ -2671,7 +2663,7 @@ add_routes ()
     puts
     while read ROUTE
     do
-        say -n "applying IPv${1#-} route '$ROUTE'..."
+        say -n "applying IPv${1#-} route '$ROUTE' ..."
         control_route "$1" replace $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
@@ -2840,7 +2832,7 @@ reconcile_gateways ()
         is_empty "$DEFAULT_GATEWAYS_IPV4$DEFAULT_GATEWAYS_IPV6" || break
 
         puts
-        say "WARNING: no alive gateways found, retrying in 1s..."
+        say "WARNING: no alive gateways found, retrying in 1s ..."
         is_diff $STATE slave || return
 
         sleep 1
@@ -3026,7 +3018,7 @@ fetch_gateways ()
     SUCCESS=1
 
     puts
-    say -n "attempting to fetch gateway state from master ($VIP)..."
+    say -n "attempting to fetch gateway state from master ($VIP) ..."
     FETCH_TIMEOUT=1
     while is_diff "$COUNT" "$RETRIES"
     do
@@ -3037,7 +3029,7 @@ fetch_gateways ()
     done 2>/dev/null
 
     is_equal "$SUCCESS" 0 && say -p " [ OK ]" || {
-        say -p " [ ERROR ]"
+        say -p " [ FAILED ]"
         say "error: ${FETCHED_GATEWAYS:-failed to fetch alive gateways list}"
         FETCHED_GATEWAYS=
         return 1
@@ -3094,11 +3086,13 @@ sync_gateways ()
     do
         format_route
         collect_show_route
-        say "configuring IPv${FAMILY#-} route: '$ROUTE'"
+        say -n "configuring IPv${FAMILY#-} route: '$ROUTE' ..."
         is_local_interface "$LOCAL_INTERFACE" || {
+            say -p " [ FAILED ]"
             say "interface '$LOCAL_INTERFACE' is not found or down for gateway '$GATEWAY'"
             continue
         }
+        say -p " [ OK ]"
         BEST_GATEWAY=$GATEWAY
         BEST_ROUTE=$ROUTE
         BEST_CLEAN_ROUTE=$CLEAN_ROUTE
@@ -3244,7 +3238,7 @@ main ()
     setup_core_env
     setup_defaults
 
-    say "loading configuration..."
+    say "loading configuration ..."
     include_config
     verify_config_syntax
     resolve_dependencies &&
