@@ -2808,19 +2808,17 @@ reconcile_gateways ()
         do
             format_route
             collect_show_route
-            puts
-            say "testing IPv${FAMILY#-} route: '$ROUTE'"
 
             is_equal "$CURRENT_FAMILY" "$FAMILY" &&
             is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
                 is_empty "$BEST_ROUTE" || collect_route
-                is_empty_alive_metrics || is_failed_metric || {
-                    say "skipping gateway: active route already found with metric '${METRIC:-0}'"
-                    continue
-                }
+                is_empty_alive_metrics || is_failed_metric || continue
                 CURRENT_FAMILY=$FAMILY
                 CURRENT_METRIC=${METRIC:-0}
             }
+
+            puts
+            say "testing IPv${FAMILY#-} route: '$ROUTE'"
 
             check_interface_state || {
                 collect_dead_route
