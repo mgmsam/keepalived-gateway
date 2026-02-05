@@ -2541,6 +2541,9 @@ report_dead_routes ()
 
 check_gateways ()
 {
+    is_not_empty "${ACTIVE_GATEWAYS_IPV4:-}${ACTIVE_GATEWAYS_IPV6:-}" ||
+        return
+
     RESULT=0
 
     ALIVE_ROUTE_MASKS_IPV4=
@@ -2551,9 +2554,6 @@ check_gateways ()
     ALIVE_GATEWAYS_IPV6=
     ALIVE_ROUTES_IPV6=
     reset_alive_metrics
-
-    is_not_empty "${ACTIVE_GATEWAYS_IPV4:=}${ACTIVE_GATEWAYS_IPV6:=}" ||
-        return
 
     for GATEWAY in $ACTIVE_GATEWAYS_IPV4 $ACTIVE_GATEWAYS_IPV6
     do
@@ -2626,10 +2626,10 @@ is_empty_alive_metrics ()
 {
     case "$FAMILY" in
         -4)
-            is_empty "$ALIVE_METRICS_IPV4" || return
+            is_empty "${ALIVE_METRICS_IPV4:-}" || return
         ;;
         -6)
-            is_empty "$ALIVE_METRICS_IPV6" || return
+            is_empty "${ALIVE_METRICS_IPV6:-}" || return
         ;;
     esac
 }
@@ -2862,13 +2862,13 @@ update_gateways_state ()
 
 reconcile_gateways ()
 {
-    ROUTE_MASKS_IPV4=$ALIVE_ROUTE_MASKS_IPV4
-    ACTIVE_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
-    ACTIVE_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
+    ROUTE_MASKS_IPV4=${ALIVE_ROUTE_MASKS_IPV4:-}
+    ACTIVE_GATEWAYS_IPV4=${ALIVE_GATEWAYS_IPV4:-}
+    ACTIVE_ROUTES_IPV4=${ALIVE_ROUTES_IPV4:-}
 
-    ROUTE_MASKS_IPV6=$ALIVE_ROUTE_MASKS_IPV6
-    ACTIVE_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
-    ACTIVE_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
+    ROUTE_MASKS_IPV6=${ALIVE_ROUTE_MASKS_IPV6:-}
+    ACTIVE_GATEWAYS_IPV6=${ALIVE_GATEWAYS_IPV6:-}
+    ACTIVE_ROUTES_IPV6=${ALIVE_ROUTES_IPV6:-}
 
     while loop
     do
