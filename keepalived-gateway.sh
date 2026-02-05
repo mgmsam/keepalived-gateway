@@ -2660,6 +2660,27 @@ is_failed_metric ()
     is_metric_alive && return 1 || return 0
 }
 
+is_alive_gateway ()
+{
+    case "$FAMILY" in
+        -4)
+            case " $ALIVE_GATEWAYS_IPV4 " in
+                *" $GATEWAY "*)
+                    return 0
+                ;;
+            esac
+        ;;
+        -6)
+            case " $ALIVE_GATEWAYS_IPV6 " in
+                *" $GATEWAY "*)
+                    return 0
+                ;;
+            esac
+        ;;
+    esac
+    return 1
+}
+
 get_time ()
 {
     date "+%s"
@@ -2860,7 +2881,10 @@ reconcile_gateways ()
             is_equal "$CURRENT_FAMILY" "$FAMILY" &&
             is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
                 is_empty "$BEST_ROUTE" || collect_route
-                is_empty_alive_metrics || is_failed_metric || continue
+                is_empty_alive_metrics || is_failed_metric || {
+                    is_alive_gateway || collect_dead_route
+                    continue
+                }
                 CURRENT_FAMILY=$FAMILY
                 CURRENT_METRIC=${METRIC:-0}
             }
@@ -2889,9 +2913,11 @@ reconcile_gateways ()
                     collect_alive_metric
                     CURRENT_METRIC=
                 fi && {
-                    BEST_CLEAN_ROUTE=$CLEAN_ROUTE
-                    BEST_GATEWAY=$GATEWAY
-                    BEST_ROUTE=$ROUTE
+                    is_empty "$BEST_ROUTE" && {
+                        BEST_CLEAN_ROUTE=$CLEAN_ROUTE
+                        BEST_GATEWAY=$GATEWAY
+                        BEST_ROUTE=$ROUTE
+                    }
                 }
             } || collect_dead_route
         done
