@@ -3176,9 +3176,12 @@ sync_gateways ()
     say "applying new gateway configuration from master ($VIP)"
 
     SHOW_ROUTES=
+
+    CLEAN_ROUTES_IPV4=
     DEFAULT_GATEWAYS_IPV4=
     DEFAULT_ROUTES_IPV4=
 
+    CLEAN_ROUTES_IPV6=
     DEFAULT_GATEWAYS_IPV6=
     DEFAULT_ROUTES_IPV6=
     reset_dead_routes
