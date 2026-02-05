@@ -2738,7 +2738,10 @@ evaluate_speed ()
         LOCAL_INTERFACE=$(get_gateway_interface "$SPEEDTEST_IP")
 
     speedtest && {
-        test "$BEST_SPEED" -ge "$BIT" || BEST_SPEED=$BIT
+        test "$BEST_SPEED" -ge "$BIT" || {
+            BEST_SPEED=$BIT
+            BEST_ROUTE=
+        }
         say -p " [ $(bit2Human "$BIT")/s ]"
     } || say -p " [ FAILED ]"
 
