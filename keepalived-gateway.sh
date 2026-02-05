@@ -2917,7 +2917,12 @@ say_gateways_state ()
 save_gateways_state ()
 {
     case "$SERVE_GATEWAYS" in
-        "" | serve_netcat)
+        serve_netcat)
+            KEEP_ALIVE=true
+            is_equal "${PREVIOUS_GATEWAYS:=$DEFAULT_GATEWAYS}" "$DEFAULT_GATEWAYS" || {
+                PREVIOUS_GATEWAYS=$DEFAULT_GATEWAYS
+                KEEP_ALIVE=false
+            }
             return
         ;;
     esac
@@ -2977,12 +2982,17 @@ serve_telnetd ()
     $SERVER -f "$GATEWAYS_STATE_FILE"
 }
 
+kill_serve_gateways ()
+{
+    kill "$GATEWAY_SERVER_PID" 2>/dev/null || :
+    GATEWAY_SERVER_PID=
+}
+
 stop_serve_gateways ()
 {
     if is_process_alive "$GATEWAY_SERVER_PID"
     then
-        kill "$GATEWAY_SERVER_PID" 2>/dev/null || :
-        GATEWAY_SERVER_PID=
+        kill_serve_gateways
         say "gateway server stopped"
     fi
 }
@@ -2998,7 +3008,12 @@ serve_gateways ()
         return
     }
 
-    is_process_alive "${GATEWAY_SERVER_PID:-}" || {
+    is_process_alive "${GATEWAY_SERVER_PID:-}" && {
+        $KEEP_ALIVE || {
+            kill_serve_gateways
+            false
+        }
+    } || {
         is_port_free "$VIP_PORT" || {
             say -p " [ FAILED ]"
             say "error: cannot start sync server, port is busy: '$VIP_PORT'"
