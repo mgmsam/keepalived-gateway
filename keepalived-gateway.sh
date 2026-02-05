@@ -227,6 +227,11 @@ is_root_access ()
     test -w /dev/console
 }
 
+loop ()
+{
+    :
+}
+
 set_state ()
 {
     say "switching to $1 mode"
@@ -2400,9 +2405,10 @@ clean_and_exit ()
     exit $EXIT_CODE
 }
 
-loop ()
+reset_alive_metrics ()
 {
-    :
+    ALIVE_METRICS_IPV4=
+    ALIVE_METRICS_IPV6=
 }
 
 format_route ()
@@ -2538,12 +2544,11 @@ check_gateways ()
     ALIVE_CLEAN_ROUTES_IPV4=
     ALIVE_GATEWAYS_IPV4=
     ALIVE_ROUTES_IPV4=
-    ALIVE_METRICS_IPV4=
 
     ALIVE_CLEAN_ROUTES_IPV6=
     ALIVE_GATEWAYS_IPV6=
     ALIVE_ROUTES_IPV6=
-    ALIVE_METRICS_IPV6=
+    reset_alive_metrics
 
     is_not_empty "${DEFAULT_GATEWAYS_IPV4:=}${DEFAULT_GATEWAYS_IPV6:=}" ||
         return
@@ -2575,6 +2580,17 @@ reset_dead_routes ()
 {
     DEAD_ROUTES_IPV4=
     DEAD_ROUTES_IPV6=
+}
+
+reset_reconcile_state ()
+{
+    BEST_GATEWAY=
+    BEST_ROUTE=
+    BEST_SPEED=0
+    CURRENT_FAMILY=
+    CURRENT_METRIC=
+    SHOW_ROUTES=
+    reset_dead_routes
 }
 
 collect_show_route ()
@@ -2824,17 +2840,9 @@ reconcile_gateways ()
     DEFAULT_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
     DEFAULT_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
 
-    CURRENT_FAMILY=
-    CURRENT_METRIC=
-    SHOW_ROUTES=
-
-    BEST_GATEWAY=
-    BEST_ROUTE=
-    BEST_SPEED=0
-
     while loop
     do
-        reset_dead_routes
+        reset_reconcile_state
         for GATEWAY in $GATEWAYS_IPV4 $GATEWAYS_IPV6
         do
             format_route
@@ -2888,6 +2896,7 @@ reconcile_gateways ()
         say "WARNING: no alive gateways found, retrying in 1s ..."
         is_diff $STATE slave || return
 
+        reset_alive_metrics
         sleep 1
     done
 
