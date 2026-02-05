@@ -2483,10 +2483,12 @@ collect_dead_route ()
         -4)
             ROUTE="dead IPv4 route: '$ROUTE'"
             DEAD_ROUTES_IPV4=${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE
+            DEAD_GATEWAYS_IPV4=${DEAD_GATEWAYS_IPV4:+$DEAD_GATEWAYS_IPV4 }!$GATEWAY
         ;;
         -6)
             ROUTE="dead IPv6 route: '$ROUTE'"
             DEAD_ROUTES_IPV6=${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE
+            DEAD_GATEWAYS_IPV6=${DEAD_GATEWAYS_IPV6:+$DEAD_GATEWAYS_IPV6 }!$GATEWAY
         ;;
     esac
 }
@@ -2579,7 +2581,10 @@ check_gateways ()
 reset_dead_routes ()
 {
     DEAD_ROUTES_IPV4=
+    DEAD_GATEWAYS_IPV4=
+
     DEAD_ROUTES_IPV6=
+    DEAD_GATEWAYS_IPV6=
 }
 
 reset_reconcile_state ()
@@ -2827,7 +2832,11 @@ refresh_routing_table ()
 
 update_gateways_state ()
 {
-    DEFAULT_GATEWAYS=${DEFAULT_GATEWAYS_IPV4:--}$LF${DEFAULT_GATEWAYS_IPV6:--}
+    set -- "$DEFAULT_GATEWAYS_IPV4" "$DEFAULT_GATEWAYS_IPV6"
+    IPV4="$1${DEAD_GATEWAYS_IPV4:+${1:+ }$DEAD_GATEWAYS_IPV4}"
+    IPV6="$2${DEAD_GATEWAYS_IPV6:+${2:+ }$DEAD_GATEWAYS_IPV6}"
+
+    DEFAULT_GATEWAYS=${IPV4:--}$LF${IPV6:--}
 }
 
 reconcile_gateways ()
@@ -3163,6 +3172,7 @@ sync_gateways ()
     }
     say "applying new gateway configuration from master ($VIP)"
 
+    SHOW_ROUTES=
     DEFAULT_GATEWAYS_IPV4=
     DEFAULT_ROUTES_IPV4=
 
@@ -3172,11 +3182,25 @@ sync_gateways ()
 
     for GATEWAY in $FETCHED_GATEWAYS_IPV4 $FETCHED_GATEWAYS_IPV6
     do
+        case "$GATEWAY" in
+            \!*)
+                GATEWAY="${GATEWAY#?}"
+                ALIVE_ROUTE=false
+            ;;
+            *)
+                ALIVE_ROUTE=true
+            ;;
+        esac
         format_route
         collect_show_route
         puts
         say "configuring IPv${FAMILY#-} route: '$ROUTE'"
-        check_interface_state || continue
+
+        $ALIVE_ROUTE && check_interface_state || {
+            collect_dead_route
+            continue
+        }
+
         BEST_GATEWAY=$GATEWAY
         BEST_ROUTE=$ROUTE
         BEST_CLEAN_ROUTE=$CLEAN_ROUTE
