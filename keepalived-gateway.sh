@@ -81,7 +81,7 @@ else
         {
             "$USE_ESCAPE" && FORMAT=${CAN_ESCAPE:+%b} || FORMAT=%s
             is_empty "$NON" && printf "${FORMAT:-%s}\n" "$*" ||
-                                    printf "${FORMAT:-%s}"   "$*"
+                               printf "${FORMAT:-%s}"   "$*"
         }
     elif type echo
     then
@@ -115,9 +115,20 @@ else
     fi >/dev/null 2>&1
 fi
 
+say_list ()
+{
+    while IFS= read -r LINE
+    do
+        puts "${2:-}$LINE"
+    done <<EOF
+$1
+EOF
+}
+
 say ()
 {
     RESULT=$?
+    LIST=false
     NON=
     NO_PREFIX=false
     USE_ESCAPE=$CAN_ESCAPE
@@ -125,14 +136,17 @@ say ()
     while is_diff $# 0
     do
         case "${1:-}" in
-            -r)
-                USE_ESCAPE=false
+            -l)
+                LIST=true
             ;;
             -n)
                 NON=-n
             ;;
             -p)
                 NO_PREFIX=true
+            ;;
+            -r)
+                USE_ESCAPE=false
             ;;
             "" | *[!0123456789]*)
                 break
@@ -149,11 +163,21 @@ say ()
         EXIT_CODE=$RESULT
 
     is_empty "$*" || {
-        if "$NO_PREFIX"
+        if "$LIST"
         then
-            puts "${1:+$*}"
+            if "$NO_PREFIX"
+            then
+                say_list "${1:+$*}"
+            else
+                say_list "${1:+$*}" "${LOG_PREFIX:-$0: }"
+            fi
         else
-            puts "${LOG_PREFIX:-$0: }${1:+$*}"
+            if "$NO_PREFIX"
+            then
+                puts "${1:+$*}"
+            else
+                puts "${LOG_PREFIX:-$0: }${1:+$*}"
+            fi
         fi
         NON=
     }
@@ -2451,10 +2475,10 @@ collect_dead_route ()
 {
     case "$FAMILY" in
         -4)
-            DEAD_ROUTES_IPV4=${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE
+            DEAD_ROUTES_IPV4="${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}  [$ROUTE]"
         ;;
         -6)
-            DEAD_ROUTES_IPV6=${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE
+            DEAD_ROUTES_IPV6="${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}  [$ROUTE]"
         ;;
     esac
 }
@@ -2496,12 +2520,12 @@ report_dead_routes ()
 {
     is_empty "${DEAD_ROUTES_IPV4:-}" || {
         puts
-        say 1 "dead IPv4 routes detected:\n  $DEAD_ROUTES_IPV4"
+        say 1 -l "dead IPv4 routes detected:$LF$DEAD_ROUTES_IPV4"
     }
 
     is_empty "${DEAD_ROUTES_IPV6:-}" || {
         puts
-        say 1 "dead IPv6 routes detected:\n  $DEAD_ROUTES_IPV6"
+        say 1 -l "dead IPv6 routes detected:$LF$DEAD_ROUTES_IPV6"
     }
 }
 
@@ -2867,9 +2891,9 @@ reconcile_gateways ()
 say_gateways_state ()
 {
     puts
-    say "optimized gateway state:"
-    say "  IPv4 [${DEFAULT_GATEWAYS_IPV4:-no alive gateways provided}]"
-    say "  IPv6 [${DEFAULT_GATEWAYS_IPV6:-no alive gateways provided}]"
+    set -- "$DEFAULT_GATEWAYS_IPV4" "$DEFAULT_GATEWAYS_IPV6"
+    REPORT="${1:+$LF  IPv4: [$1]}${2:+$LF  IPv6: [$2]}"
+    say -l "optimized gateway state:$REPORT"
 }
 
 save_gateways_state ()
@@ -3070,9 +3094,9 @@ fetch_gateways ()
     FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS_IPV4#-}
     FETCHED_GATEWAYS_IPV6=${FETCHED_GATEWAYS_IPV6#-}
 
-    say "received remote state from master ($VIP):"
-    say "  IPv4 [${FETCHED_GATEWAYS_IPV4:-no alive gateways provided}]"
-    say "  IPv6 [${FETCHED_GATEWAYS_IPV6:-no alive gateways provided}]"
+    set -- "$FETCHED_GATEWAYS_IPV4" "$FETCHED_GATEWAYS_IPV6"
+    REPORT="${1:+$LF  IPv4: [$1]}${2:+$LF  IPv6: [$2]}"
+    say -l "received remote state from master ($VIP):$REPORT"
 
     is_equal "$IGNOREMETRIC" no || {
         FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS_IPV4%%$SPACE*}
