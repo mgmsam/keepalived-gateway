@@ -2571,6 +2571,12 @@ check_gateways ()
     return $RESULT
 }
 
+reset_dead_routes ()
+{
+    DEAD_ROUTES_IPV4=
+    DEAD_ROUTES_IPV6=
+}
+
 collect_show_route ()
 {
     SHOW_ROUTES=${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE
@@ -2813,12 +2819,10 @@ reconcile_gateways ()
     CLEAN_ROUTES_IPV4=$ALIVE_CLEAN_ROUTES_IPV4
     DEFAULT_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
     DEFAULT_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
-    DEAD_ROUTES_IPV4=
 
     CLEAN_ROUTES_IPV6=$ALIVE_CLEAN_ROUTES_IPV6
     DEFAULT_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
     DEFAULT_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
-    DEAD_ROUTES_IPV6=
 
     CURRENT_FAMILY=
     CURRENT_METRIC=
@@ -2830,6 +2834,7 @@ reconcile_gateways ()
 
     while loop
     do
+        reset_dead_routes
         for GATEWAY in $GATEWAYS_IPV4 $GATEWAYS_IPV6
         do
             format_route
@@ -3136,11 +3141,10 @@ sync_gateways ()
 
     DEFAULT_GATEWAYS_IPV4=
     DEFAULT_ROUTES_IPV4=
-    DEAD_ROUTES_IPV4=
 
     DEFAULT_GATEWAYS_IPV6=
     DEFAULT_ROUTES_IPV6=
-    DEAD_ROUTES_IPV6=
+    reset_dead_routes
 
     for GATEWAY in $FETCHED_GATEWAYS_IPV4 $FETCHED_GATEWAYS_IPV6
     do
