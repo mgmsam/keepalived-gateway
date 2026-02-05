@@ -2446,7 +2446,7 @@ format_route ()
     get_route default $GATEWAY_IP "$LOCAL_INTERFACE" $LOCAL_METRIC
     ROUTE=$ROUTE
 
-    CLEAN_ROUTE="default $GATEWAY_IP ${LOCAL_INTERFACE:--} $LOCAL_METRIC"
+    ROUTE_MASK="default $GATEWAY_IP ${LOCAL_INTERFACE:--} $LOCAL_METRIC"
 }
 
 is_local_interface ()
@@ -2477,18 +2477,18 @@ check_interface_state ()
     say -p " [ OK ]"
 }
 
-collect_dead_route ()
+collect_inactive_gateway ()
 {
     case "$FAMILY" in
         -4)
-            ROUTE="dead IPv4 route: '$ROUTE'"
-            DEAD_ROUTES_IPV4=${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE
-            DEAD_GATEWAYS_IPV4=${DEAD_GATEWAYS_IPV4:+$DEAD_GATEWAYS_IPV4 }!$GATEWAY
+            ROUTE="inactive IPv4 route: '$ROUTE'"
+            INACTIVE_ROUTES_IPV4=${INACTIVE_ROUTES_IPV4:+$INACTIVE_ROUTES_IPV4$LF}$ROUTE
+            INACTIVE_GATEWAYS_IPV4=${INACTIVE_GATEWAYS_IPV4:+$INACTIVE_GATEWAYS_IPV4 }!$GATEWAY
         ;;
         -6)
-            ROUTE="dead IPv6 route: '$ROUTE'"
-            DEAD_ROUTES_IPV6=${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE
-            DEAD_GATEWAYS_IPV6=${DEAD_GATEWAYS_IPV6:+$DEAD_GATEWAYS_IPV6 }!$GATEWAY
+            ROUTE="inactive IPv6 route: '$ROUTE'"
+            INACTIVE_ROUTES_IPV6=${INACTIVE_ROUTES_IPV6:+$INACTIVE_ROUTES_IPV6$LF}$ROUTE
+            INACTIVE_GATEWAYS_IPV6=${INACTIVE_GATEWAYS_IPV6:+$INACTIVE_GATEWAYS_IPV6 }!$GATEWAY
         ;;
     esac
 }
@@ -2502,12 +2502,12 @@ collect_alive_route ()
 {
     case "$FAMILY" in
         -4)
-            ALIVE_CLEAN_ROUTES_IPV4=${ALIVE_CLEAN_ROUTES_IPV4:+$ALIVE_CLEAN_ROUTES_IPV4$LF}$CLEAN_ROUTE
+            ALIVE_ROUTE_MASKS_IPV4=${ALIVE_ROUTE_MASKS_IPV4:+$ALIVE_ROUTE_MASKS_IPV4$LF}$ROUTE_MASK
             ALIVE_GATEWAYS_IPV4=${ALIVE_GATEWAYS_IPV4:+$ALIVE_GATEWAYS_IPV4 }$GATEWAY
             ALIVE_ROUTES_IPV4=${ALIVE_ROUTES_IPV4:+$ALIVE_ROUTES_IPV4$LF}$ROUTE
         ;;
         -6)
-            ALIVE_CLEAN_ROUTES_IPV6=${ALIVE_CLEAN_ROUTES_IPV6:+$ALIVE_CLEAN_ROUTES_IPV6$LF}$CLEAN_ROUTE
+            ALIVE_ROUTE_MASKS_IPV6=${ALIVE_ROUTE_MASKS_IPV6:+$ALIVE_ROUTE_MASKS_IPV6$LF}$ROUTE_MASK
             ALIVE_GATEWAYS_IPV6=${ALIVE_GATEWAYS_IPV6:+$ALIVE_GATEWAYS_IPV6 }$GATEWAY
             ALIVE_ROUTES_IPV6=${ALIVE_ROUTES_IPV6:+$ALIVE_ROUTES_IPV6$LF}$ROUTE
         ;;
@@ -2528,14 +2528,14 @@ collect_alive_metric ()
 
 report_dead_routes ()
 {
-    is_empty "${DEAD_ROUTES_IPV4:-}" || {
+    is_empty "${INACTIVE_ROUTES_IPV4:-}" || {
         puts
-        say 1 -l "$DEAD_ROUTES_IPV4"
+        say 1 -l "$INACTIVE_ROUTES_IPV4"
     }
 
-    is_empty "${DEAD_ROUTES_IPV6:-}" || {
+    is_empty "${INACTIVE_ROUTES_IPV6:-}" || {
         puts
-        say 1 -l "$DEAD_ROUTES_IPV6"
+        say 1 -l "$INACTIVE_ROUTES_IPV6"
     }
 }
 
@@ -2543,19 +2543,19 @@ check_gateways ()
 {
     RESULT=0
 
-    ALIVE_CLEAN_ROUTES_IPV4=
+    ALIVE_ROUTE_MASKS_IPV4=
     ALIVE_GATEWAYS_IPV4=
     ALIVE_ROUTES_IPV4=
 
-    ALIVE_CLEAN_ROUTES_IPV6=
+    ALIVE_ROUTE_MASKS_IPV6=
     ALIVE_GATEWAYS_IPV6=
     ALIVE_ROUTES_IPV6=
     reset_alive_metrics
 
-    is_not_empty "${DEFAULT_GATEWAYS_IPV4:=}${DEFAULT_GATEWAYS_IPV6:=}" ||
+    is_not_empty "${ACTIVE_GATEWAYS_IPV4:=}${ACTIVE_GATEWAYS_IPV6:=}" ||
         return
 
-    for GATEWAY in $DEFAULT_GATEWAYS_IPV4 $DEFAULT_GATEWAYS_IPV6
+    for GATEWAY in $ACTIVE_GATEWAYS_IPV4 $ACTIVE_GATEWAYS_IPV6
     do
         format_route
         puts
@@ -2571,7 +2571,7 @@ check_gateways ()
                 collect_alive_route
                 collect_alive_metric
             }
-        } || collect_dead_route
+        } || collect_inactive_gateway
     done
 
     report_dead_routes
@@ -2580,11 +2580,11 @@ check_gateways ()
 
 reset_dead_routes ()
 {
-    DEAD_ROUTES_IPV4=
-    DEAD_GATEWAYS_IPV4=
+    INACTIVE_ROUTES_IPV4=
+    INACTIVE_GATEWAYS_IPV4=
 
-    DEAD_ROUTES_IPV6=
-    DEAD_GATEWAYS_IPV6=
+    INACTIVE_ROUTES_IPV6=
+    INACTIVE_GATEWAYS_IPV6=
 }
 
 reset_reconcile_state ()
@@ -2607,14 +2607,14 @@ collect_route ()
 {
     case "$FAMILY" in
         -4)
-            CLEAN_ROUTES_IPV4=${CLEAN_ROUTES_IPV4:+$CLEAN_ROUTES_IPV4$LF}$BEST_CLEAN_ROUTE
-            DEFAULT_GATEWAYS_IPV4=${DEFAULT_GATEWAYS_IPV4:+$DEFAULT_GATEWAYS_IPV4 }$BEST_GATEWAY
-            DEFAULT_ROUTES_IPV4=${DEFAULT_ROUTES_IPV4:+$DEFAULT_ROUTES_IPV4$LF}$BEST_ROUTE
+            ROUTE_MASKS_IPV4=${ROUTE_MASKS_IPV4:+$ROUTE_MASKS_IPV4$LF}$BEST_CLEAN_ROUTE
+            ACTIVE_GATEWAYS_IPV4=${ACTIVE_GATEWAYS_IPV4:+$ACTIVE_GATEWAYS_IPV4 }$BEST_GATEWAY
+            ACTIVE_ROUTES_IPV4=${ACTIVE_ROUTES_IPV4:+$ACTIVE_ROUTES_IPV4$LF}$BEST_ROUTE
         ;;
         -6)
-            CLEAN_ROUTES_IPV6=${CLEAN_ROUTES_IPV6:+$CLEAN_ROUTES_IPV6$LF}$BEST_CLEAN_ROUTE
-            DEFAULT_GATEWAYS_IPV6=${DEFAULT_GATEWAYS_IPV6:+$DEFAULT_GATEWAYS_IPV6 }$BEST_GATEWAY
-            DEFAULT_ROUTES_IPV6=${DEFAULT_ROUTES_IPV6:+$DEFAULT_ROUTES_IPV6$LF}$BEST_ROUTE
+            ROUTE_MASKS_IPV6=${ROUTE_MASKS_IPV6:+$ROUTE_MASKS_IPV6$LF}$BEST_CLEAN_ROUTE
+            ACTIVE_GATEWAYS_IPV6=${ACTIVE_GATEWAYS_IPV6:+$ACTIVE_GATEWAYS_IPV6 }$BEST_GATEWAY
+            ACTIVE_ROUTES_IPV6=${ACTIVE_ROUTES_IPV6:+$ACTIVE_ROUTES_IPV6$LF}$BEST_ROUTE
         ;;
     esac
     BEST_GATEWAY=
@@ -2837,38 +2837,38 @@ remove_obsolete_routes ()
 refresh_routing_table ()
 {
     EXIT_CODE=0
-    is_empty "$DEFAULT_GATEWAYS_IPV4" || {
-        add_routes -4 "$DEFAULT_ROUTES_IPV4" &&
+    is_empty "$ACTIVE_GATEWAYS_IPV4" || {
+        add_routes -4 "$ACTIVE_ROUTES_IPV4" &&
         get_current_routes &&
-        get_obsolete_routes "$CLEAN_ROUTES_IPV4" &&
+        get_obsolete_routes "$ROUTE_MASKS_IPV4" &&
         remove_obsolete_routes -4 || :
     }
-    is_empty "$DEFAULT_GATEWAYS_IPV6" || {
-        add_routes -6 "$DEFAULT_ROUTES_IPV6" &&
+    is_empty "$ACTIVE_GATEWAYS_IPV6" || {
+        add_routes -6 "$ACTIVE_ROUTES_IPV6" &&
         get_current_routes &&
-        get_obsolete_routes "$CLEAN_ROUTES_IPV6" &&
+        get_obsolete_routes "$ROUTE_MASKS_IPV6" &&
         remove_obsolete_routes -6 || :
     }
 }
 
 update_gateways_state ()
 {
-    set -- "$DEFAULT_GATEWAYS_IPV4" "$DEFAULT_GATEWAYS_IPV6"
-    IPV4="$1${DEAD_GATEWAYS_IPV4:+${1:+ }$DEAD_GATEWAYS_IPV4}"
-    IPV6="$2${DEAD_GATEWAYS_IPV6:+${2:+ }$DEAD_GATEWAYS_IPV6}"
+    set -- "$ACTIVE_GATEWAYS_IPV4" "$ACTIVE_GATEWAYS_IPV6"
+    IPV4="$1${INACTIVE_GATEWAYS_IPV4:+${1:+ }$INACTIVE_GATEWAYS_IPV4}"
+    IPV6="$2${INACTIVE_GATEWAYS_IPV6:+${2:+ }$INACTIVE_GATEWAYS_IPV6}"
 
     DEFAULT_GATEWAYS=${IPV4:--}$LF${IPV6:--}
 }
 
 reconcile_gateways ()
 {
-    CLEAN_ROUTES_IPV4=$ALIVE_CLEAN_ROUTES_IPV4
-    DEFAULT_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
-    DEFAULT_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
+    ROUTE_MASKS_IPV4=$ALIVE_ROUTE_MASKS_IPV4
+    ACTIVE_GATEWAYS_IPV4=$ALIVE_GATEWAYS_IPV4
+    ACTIVE_ROUTES_IPV4=$ALIVE_ROUTES_IPV4
 
-    CLEAN_ROUTES_IPV6=$ALIVE_CLEAN_ROUTES_IPV6
-    DEFAULT_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
-    DEFAULT_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
+    ROUTE_MASKS_IPV6=$ALIVE_ROUTE_MASKS_IPV6
+    ACTIVE_GATEWAYS_IPV6=$ALIVE_GATEWAYS_IPV6
+    ACTIVE_ROUTES_IPV6=$ALIVE_ROUTES_IPV6
 
     while loop
     do
@@ -2882,7 +2882,7 @@ reconcile_gateways ()
             is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
                 is_empty "$BEST_ROUTE" || collect_route
                 is_empty_alive_metrics || is_failed_metric || {
-                    is_alive_gateway || collect_dead_route
+                    is_alive_gateway || collect_inactive_gateway
                     continue
                 }
                 CURRENT_FAMILY=$FAMILY
@@ -2893,7 +2893,7 @@ reconcile_gateways ()
             say "testing IPv${FAMILY#-} route: '$ROUTE'"
 
             check_interface_state || {
-                collect_dead_route
+                collect_inactive_gateway
                 continue
             }
 
@@ -2914,18 +2914,18 @@ reconcile_gateways ()
                     CURRENT_METRIC=
                 fi && {
                     is_empty "$BEST_ROUTE" && {
-                        BEST_CLEAN_ROUTE=$CLEAN_ROUTE
+                        BEST_CLEAN_ROUTE=$ROUTE_MASK
                         BEST_GATEWAY=$GATEWAY
                         BEST_ROUTE=$ROUTE
                     }
                 }
-            } || collect_dead_route
+            } || collect_inactive_gateway
         done
         is_empty "$BEST_ROUTE" || collect_route
 
         report_dead_routes
 
-        is_empty "$DEFAULT_GATEWAYS_IPV4$DEFAULT_GATEWAYS_IPV6" || break
+        is_empty "$ACTIVE_GATEWAYS_IPV4$ACTIVE_GATEWAYS_IPV6" || break
 
         puts
         say "WARNING: no alive gateways found, retrying in 1s ..."
@@ -2942,12 +2942,12 @@ reconcile_gateways ()
 say_gateways_state ()
 {
     REPORT=
-    set -- "$DEFAULT_GATEWAYS_IPV4" "$DEFAULT_GATEWAYS_IPV6"
-    IPV4="$1${DEAD_GATEWAYS_IPV4:+${1:+ }$DEAD_GATEWAYS_IPV4}"
-    IPV6="$2${DEAD_GATEWAYS_IPV6:+${2:+ }$DEAD_GATEWAYS_IPV6}"
+    set -- "$ACTIVE_GATEWAYS_IPV4" "$ACTIVE_GATEWAYS_IPV6"
+    IPV4="$1${INACTIVE_GATEWAYS_IPV4:+${1:+ }$INACTIVE_GATEWAYS_IPV4}"
+    IPV6="$2${INACTIVE_GATEWAYS_IPV6:+${2:+ }$INACTIVE_GATEWAYS_IPV6}"
 
-    is_empty "$IPV4" || REPORT="optimized IPv4 gateways: '$IPV4'"
-    REPORT="$REPORT${IPV6:+${IPV4:+$LF}optimized IPv6 gateways: '$IPV6'}"
+    is_empty "$IPV4" || REPORT="active IPv4 gateways: '$IPV4'"
+    REPORT="$REPORT${IPV6:+${IPV4:+$LF}active IPv6 gateways: '$IPV6'}"
     puts
     say -l "$REPORT"
 }
@@ -3203,13 +3203,13 @@ sync_gateways ()
 
     SHOW_ROUTES=
 
-    CLEAN_ROUTES_IPV4=
-    DEFAULT_GATEWAYS_IPV4=
-    DEFAULT_ROUTES_IPV4=
+    ROUTE_MASKS_IPV4=
+    ACTIVE_GATEWAYS_IPV4=
+    ACTIVE_ROUTES_IPV4=
 
-    CLEAN_ROUTES_IPV6=
-    DEFAULT_GATEWAYS_IPV6=
-    DEFAULT_ROUTES_IPV6=
+    ROUTE_MASKS_IPV6=
+    ACTIVE_GATEWAYS_IPV6=
+    ACTIVE_ROUTES_IPV6=
     reset_dead_routes
 
     for GATEWAY in $FETCHED_GATEWAYS_IPV4 $FETCHED_GATEWAYS_IPV6
@@ -3229,13 +3229,13 @@ sync_gateways ()
         say "configuring IPv${FAMILY#-} route: '$ROUTE'"
 
         $ALIVE_ROUTE && check_interface_state || {
-            collect_dead_route
+            collect_inactive_gateway
             continue
         }
 
         BEST_GATEWAY=$GATEWAY
         BEST_ROUTE=$ROUTE
-        BEST_CLEAN_ROUTE=$CLEAN_ROUTE
+        BEST_CLEAN_ROUTE=$ROUTE_MASK
         collect_route
     done
 
