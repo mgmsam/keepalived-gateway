@@ -2475,10 +2475,12 @@ collect_dead_route ()
 {
     case "$FAMILY" in
         -4)
-            DEAD_ROUTES_IPV4="${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}  [$ROUTE]"
+            ROUTE="dead IPv4 route: '$ROUTE'"
+            DEAD_ROUTES_IPV4=${DEAD_ROUTES_IPV4:+$DEAD_ROUTES_IPV4$LF}$ROUTE
         ;;
         -6)
-            DEAD_ROUTES_IPV6="${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}  [$ROUTE]"
+            ROUTE="dead IPv6 route: '$ROUTE'"
+            DEAD_ROUTES_IPV6=${DEAD_ROUTES_IPV6:+$DEAD_ROUTES_IPV6$LF}$ROUTE
         ;;
     esac
 }
@@ -2520,12 +2522,12 @@ report_dead_routes ()
 {
     is_empty "${DEAD_ROUTES_IPV4:-}" || {
         puts
-        say 1 -l "dead IPv4 routes detected:$LF$DEAD_ROUTES_IPV4"
+        say 1 -l "$DEAD_ROUTES_IPV4"
     }
 
     is_empty "${DEAD_ROUTES_IPV6:-}" || {
         puts
-        say 1 -l "dead IPv6 routes detected:$LF$DEAD_ROUTES_IPV6"
+        say 1 -l "$DEAD_ROUTES_IPV6"
     }
 }
 
@@ -2698,7 +2700,7 @@ evaluate_speed ()
 
 evaluate_host ()
 {
-    say -n "probing ping host: '$PING_HOST' using route '$PING_ROUTE' ..."
+    say -n "probing host: '$PING_HOST' using route '$PING_ROUTE' ..."
     control_route "$FAMILY" replace $PING_ROUTE || return
 
     is_not_empty "$LOCAL_INTERFACE" ||
@@ -2716,7 +2718,7 @@ add_routes ()
     puts
     while read ROUTE
     do
-        say -n "applying IPv${1#-} route '$ROUTE' ..."
+        say -n "enforcing IPv${1#-} route: '$ROUTE' ..."
         control_route "$1" replace $ROUTE >/dev/null 2>&1 &&
             say -p " [ OK ]" ||
             say -p " [ FAILED ]"
@@ -2890,10 +2892,12 @@ reconcile_gateways ()
 
 say_gateways_state ()
 {
-    puts
+    REPORT=
     set -- "$DEFAULT_GATEWAYS_IPV4" "$DEFAULT_GATEWAYS_IPV6"
-    REPORT="${1:+$LF  IPv4: [$1]}${2:+$LF  IPv6: [$2]}"
-    say -l "optimized gateway state:$REPORT"
+    is_empty "$1" || REPORT="optimized IPv4 gateways: '$1'"
+    REPORT="$REPORT${2:+${1:+$LF}optimized IPv6 gateways: '$2'}"
+    puts
+    say -l "$REPORT"
 }
 
 save_gateways_state ()
@@ -2971,29 +2975,35 @@ stop_serve_gateways ()
 
 serve_gateways ()
 {
+    puts
+    say -n "ensuring gateway server on port: '$VIP_PORT' ..."
+
     is_vrrp_master || {
-        say "virtual IP not found on this host: '$VIP'"
-        return 1
+        say -p " [ FAILED ]"
+        say "error: virtual IP not found on this host: '$VIP'"
+        return
     }
 
     is_process_alive "${GATEWAY_SERVER_PID:-}" || {
         is_port_free "$VIP_PORT" || {
-            say "error: cannot start sync server, port $VIP_PORT is busy"
+            say -p " [ FAILED ]"
+            say "error: cannot start sync server, port is busy: '$VIP_PORT'"
             return
-        } >&2
+        }
 
         $SERVE_GATEWAYS 2>&1 &
         GATEWAY_SERVER_PID=$!
         sleep 1
 
-        if is_process_alive "$GATEWAY_SERVER_PID"
-        then
-            say "gateway server successfully started on port $VIP_PORT"
-        else
-            GATEWAY_SERVER_PID=
+        is_process_alive "$GATEWAY_SERVER_PID" || {
+            say -p " [ FAILED ]"
             say "error: gateway server failed to start (check system logs)"
-        fi >&2
+            GATEWAY_SERVER_PID=
+            return
+        }
     }
+
+    say -p " [ OK ]"
 }
 
 fetch_curl ()
@@ -3064,7 +3074,7 @@ fetch_gateways ()
 {
     COUNT=0
     RETRIES=3
-    SUCCESS=1
+    FETCH_STATUS=false
 
     puts
     say -n "attempting to fetch gateway state from master ($VIP) ..."
@@ -3072,31 +3082,29 @@ fetch_gateways ()
     while is_diff "$COUNT" "$RETRIES"
     do
         FETCHED_GATEWAYS=$($FETCH_GATEWAYS) && {
-            SUCCESS=0
+            FETCH_STATUS=true
             break
         } || COUNT=$((COUNT + 1))
     done 2>/dev/null
 
-    is_equal "$SUCCESS" 0 && say -p " [ OK ]" || {
+    "$FETCH_STATUS" && is_not_empty "$FETCHED_GATEWAYS" && say -p " [ OK ]" || {
         say -p " [ FAILED ]"
         say "error: ${FETCHED_GATEWAYS:-failed to fetch alive gateways list}"
+        say "master unreachable"
         FETCHED_GATEWAYS=
         return 1
-    } >&2
-
-    is_not_empty "$FETCHED_GATEWAYS" || {
-        say "error: received empty or invalid gateway state from master ($VIP)"
-        return 1
-    } >&2
+    }
 
     FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS%$LF*}
     FETCHED_GATEWAYS_IPV6=${FETCHED_GATEWAYS#*$LF}
     FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS_IPV4#-}
     FETCHED_GATEWAYS_IPV6=${FETCHED_GATEWAYS_IPV6#-}
 
+    REPORT=
     set -- "$FETCHED_GATEWAYS_IPV4" "$FETCHED_GATEWAYS_IPV6"
-    REPORT="${1:+$LF  IPv4: [$1]}${2:+$LF  IPv6: [$2]}"
-    say -l "received remote state from master ($VIP):$REPORT"
+    is_empty "$1" || REPORT="received IPv4 gateways: '$1'"
+    REPORT="$REPORT${2:+${1:+$LF}received IPv6 gateways: '$2'}"
+    say -l "$REPORT"
 
     is_equal "$IGNOREMETRIC" no || {
         FETCHED_GATEWAYS_IPV4=${FETCHED_GATEWAYS_IPV4%%$SPACE*}
@@ -3124,7 +3132,7 @@ sync_gateways ()
         refresh_routing_table
         return
     }
-    say "applying new gateway configuration from master ($VIP)\n"
+    say "applying new gateway configuration from master ($VIP)"
 
     DEFAULT_GATEWAYS_IPV4=
     DEFAULT_ROUTES_IPV4=
@@ -3191,23 +3199,18 @@ run_slave_mode ()
         case "$STATE" in
             slave-passive)
                 fetch_gateways && sync_gateways || {
-                    say "master unreachable"
                     sleep 1
                     continue
                 }
             ;;
             slave)
                 fetch_gateways && sync_gateways || {
-                    say "master unreachable"
                     set_state slave-single
                     false
                 }
             ;;
             slave-single)
-                fetch_gateways || {
-                    say "master unreachable"
-                    false
-                } && {
+                fetch_gateways && {
                     puts
                     say "master reachable"
                     set_state slave
@@ -3252,7 +3255,6 @@ run_cluster_mode ()
                         set_state cluster-slave
                     }
                     fetch_gateways && sync_gateways || {
-                        say "master unreachable"
                         set_state cluster-slave-single
                         false
                     }
