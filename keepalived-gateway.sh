@@ -2587,7 +2587,7 @@ reset_dead_routes ()
     INACTIVE_GATEWAYS_IPV6=
 }
 
-reset_reconcile_state ()
+reset_select_state ()
 {
     BEST_GATEWAY=
     BEST_ROUTE=
@@ -2863,7 +2863,7 @@ update_gateways_state ()
     ACTIVE_GATEWAYS=${IPV4:--}$LF${IPV6:--}
 }
 
-reconcile_gateways ()
+select_gateways ()
 {
     ROUTE_MASKS_IPV4=${ALIVE_ROUTE_MASKS_IPV4:-}
     ACTIVE_GATEWAYS_IPV4=${ALIVE_GATEWAYS_IPV4:-}
@@ -2875,7 +2875,7 @@ reconcile_gateways ()
 
     while loop
     do
-        reset_reconcile_state
+        reset_select_state
         for GATEWAY in $GATEWAYS_IPV4 $GATEWAYS_IPV6
         do
             format_route
@@ -2884,6 +2884,7 @@ reconcile_gateways ()
             is_equal "$CURRENT_FAMILY" "$FAMILY" &&
             is_equal "$CURRENT_METRIC" "${METRIC:-0}" || {
                 is_empty "$BEST_ROUTE" || collect_route
+
                 is_empty_alive_metrics || is_failed_metric || {
                     is_alive_gateway || collect_inactive_gateway
                     continue
@@ -3251,8 +3252,8 @@ run_single_mode ()
     set_state "$ROLE"
     while loop
     do
-        check_gateways || reconcile_gateways
         say_gateways_state
+        check_gateways || select_gateways
         say "next check cycle in: '$HUMAN_INTERVAL'"
         sleep $CHECK_INTERVAL
     done
@@ -3266,7 +3267,7 @@ run_master_mode ()
     while loop
     do
         check_gateways || {
-            reconcile_gateways
+            select_gateways
             save_gateways_state
         } && serve_gateways || stop_serve_gateways
         say_gateways_state
@@ -3303,7 +3304,7 @@ run_slave_mode ()
                 }
             ;;
         esac || {
-            check_gateways || reconcile_gateways || {
+            check_gateways || select_gateways || {
                 sleep 1
                 continue
             }
@@ -3326,7 +3327,7 @@ run_cluster_mode ()
                 set_state "$ROLE-master"
             }
             check_gateways || {
-                reconcile_gateways
+                select_gateways
                 save_gateways_state
             } && serve_gateways || stop_serve_gateways
             say_gateways_state
@@ -3353,7 +3354,7 @@ run_cluster_mode ()
                     }
                 ;;
             esac || {
-                check_gateways || reconcile_gateways || {
+                check_gateways || select_gateways || {
                     sleep 1
                     continue
                 }
