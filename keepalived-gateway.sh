@@ -2860,7 +2860,7 @@ update_gateways_state ()
     IPV4="$1${INACTIVE_GATEWAYS_IPV4:+${1:+ }$INACTIVE_GATEWAYS_IPV4}"
     IPV6="$2${INACTIVE_GATEWAYS_IPV6:+${2:+ }$INACTIVE_GATEWAYS_IPV6}"
 
-    DEFAULT_GATEWAYS=${IPV4:--}$LF${IPV6:--}
+    ACTIVE_GATEWAYS=${IPV4:--}$LF${IPV6:--}
 }
 
 reconcile_gateways ()
@@ -2960,8 +2960,8 @@ save_gateways_state ()
     case "$SERVE_GATEWAYS" in
         serve_netcat)
             KEEP_ALIVE=true
-            is_equal "${PREVIOUS_GATEWAYS:=$DEFAULT_GATEWAYS}" "$DEFAULT_GATEWAYS" || {
-                PREVIOUS_GATEWAYS=$DEFAULT_GATEWAYS
+            is_equal "${PREVIOUS_GATEWAYS:=$ACTIVE_GATEWAYS}" "$ACTIVE_GATEWAYS" || {
+                PREVIOUS_GATEWAYS=$ACTIVE_GATEWAYS
                 KEEP_ALIVE=false
             }
             return
@@ -2972,7 +2972,7 @@ save_gateways_state ()
         say "error: $OUTPUT"
         return 1
     } >&2
-    puts "$DEFAULT_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
+    puts "$ACTIVE_GATEWAYS" > "$GATEWAYS_STATE_FILE.tmp" &&
     mv "$GATEWAYS_STATE_FILE.tmp" "$GATEWAYS_STATE_FILE"  || {
         say "error: failed to update gateways state file: '$GATEWAYS_STATE_FILE'"
         return 1
@@ -3003,10 +3003,10 @@ serve_netcat ()
         $SERVER <<EOF &
 HTTP/1.1 200 OK$CR
 Content-Type: text/plain$CR
-Content-Length: ${#DEFAULT_GATEWAYS}$CR
+Content-Length: ${#ACTIVE_GATEWAYS}$CR
 Connection: close$CR
 $CR
-$DEFAULT_GATEWAYS
+$ACTIVE_GATEWAYS
 EOF
         NETCAT_PID=$!
         wait $NETCAT_PID
@@ -3195,9 +3195,7 @@ fetch_gateways ()
 
 sync_gateways ()
 {
-    is_not_empty "$FETCHED_GATEWAYS" || return 0
-
-    is_diff "$FETCHED_GATEWAYS" "${DEFAULT_GATEWAYS:-}" || {
+    is_diff "$FETCHED_GATEWAYS" "${ACTIVE_GATEWAYS:-}" || {
         say "local routing state is already up to date"
         refresh_routing_table
         return
