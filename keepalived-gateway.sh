@@ -3371,6 +3371,7 @@ run_cluster_mode ()
                         say "virtual IP not found on this host: '$VIP'"
                         set_state cluster-slave
                     }
+                    get_local_routes
                     fetch_gateways && sync_gateways || {
                         set_state cluster-slave-single
                         false
