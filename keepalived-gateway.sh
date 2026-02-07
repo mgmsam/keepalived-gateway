@@ -2594,12 +2594,19 @@ reset_select_state ()
     BEST_SPEED=0
     CURRENT_FAMILY=
     CURRENT_METRIC=
-    SHOW_ROUTES=
+    SHOW_ROUTES="${SHOW_MASTER_ROUTES:-}"
     reset_dead_routes
 }
 
 collect_show_route ()
 {
+    set -- $SHOW_ROUTE
+    PREFIX="$1 $2 $3 $4"
+    case "${SHOW_ROUTES:-}" in
+        *"$PREFIX"*)
+            return 0
+        ;;
+    esac
     SHOW_ROUTES=${SHOW_ROUTES:+$SHOW_ROUTES$LF}$SHOW_ROUTE
 }
 
@@ -3203,7 +3210,7 @@ sync_gateways ()
     }
     say "applying new gateway configuration from master ($VIP)"
 
-    SHOW_ROUTES=
+    SHOW_ROUTES="$SHOW_LOCAL_ROUTES"
 
     ROUTE_MASKS_IPV4=
     ACTIVE_GATEWAYS_IPV4=
@@ -3227,10 +3234,16 @@ sync_gateways ()
         esac
         format_route
         collect_show_route
+
+        $ALIVE_ROUTE || {
+            collect_inactive_gateway
+            continue
+        }
+
         puts
         say "configuring IPv${FAMILY#-} route: '$ROUTE'"
 
-        $ALIVE_ROUTE && check_interface_state || {
+        check_interface_state || {
             collect_inactive_gateway
             continue
         }
@@ -3244,6 +3257,19 @@ sync_gateways ()
     report_dead_routes
     refresh_routing_table
     update_gateways_state
+}
+
+get_local_routes ()
+{
+    is_empty "${SHOW_LOCAL_ROUTES:-}" || return 0
+
+    for GATEWAY in $GATEWAYS_IPV4 $GATEWAYS_IPV6
+    do
+        format_route
+        collect_show_route
+    done
+    SHOW_LOCAL_ROUTES="$SHOW_ROUTES"
+    SHOW_ROUTES=
 }
 
 run_single_mode ()
@@ -3290,8 +3316,12 @@ run_slave_mode ()
                 }
             ;;
             slave)
+                get_local_routes
                 fetch_gateways && sync_gateways || {
                     set_state slave-single
+                    ACTIVE_GATEWAYS_IPV4=
+                    ACTIVE_GATEWAYS_IPV6=
+                    SHOW_MASTER_ROUTES="${SHOW_ROUTES:-}"
                     false
                 }
             ;;
@@ -3300,6 +3330,7 @@ run_slave_mode ()
                     puts
                     say "master reachable"
                     set_state slave
+                    ACTIVE_GATEWAYS=
                     sync_gateways
                 }
             ;;
