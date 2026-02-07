@@ -3316,7 +3316,6 @@ run_slave_mode ()
                 }
             ;;
             slave)
-                get_local_routes
                 fetch_gateways && sync_gateways || {
                     set_state slave-single
                     ACTIVE_GATEWAYS_IPV4=
@@ -3371,9 +3370,11 @@ run_cluster_mode ()
                         say "virtual IP not found on this host: '$VIP'"
                         set_state cluster-slave
                     }
-                    get_local_routes
                     fetch_gateways && sync_gateways || {
                         set_state cluster-slave-single
+                        ACTIVE_GATEWAYS_IPV4=
+                        ACTIVE_GATEWAYS_IPV6=
+                        SHOW_MASTER_ROUTES="${SHOW_ROUTES:-}"
                         false
                     }
                 ;;
@@ -3382,6 +3383,7 @@ run_cluster_mode ()
                         puts
                         say "master reachable"
                         set_state cluster-slave
+                        ACTIVE_GATEWAYS=
                         sync_gateways
                     }
                 ;;
@@ -3428,9 +3430,11 @@ main ()
             run_master_mode
         ;;
         slave | slave-passive)
+            get_local_routes
             run_slave_mode
         ;;
         cluster)
+            get_local_routes
             run_cluster_mode
         ;;
     esac
