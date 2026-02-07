@@ -2594,7 +2594,7 @@ reset_select_state ()
     BEST_SPEED=0
     CURRENT_FAMILY=
     CURRENT_METRIC=
-    SHOW_ROUTES="${SHOW_MASTER_ROUTES:-}"
+    SHOW_ROUTES="${SHOW_PREVIOUS_ROUTES:-}"
     reset_dead_routes
 }
 
@@ -3272,6 +3272,13 @@ get_local_routes ()
     SHOW_ROUTES=
 }
 
+reset_active_gateways ()
+{
+    ACTIVE_GATEWAYS_IPV4=
+    ACTIVE_GATEWAYS_IPV6=
+    SHOW_PREVIOUS_ROUTES="${SHOW_ROUTES:-}"
+}
+
 run_single_mode ()
 {
     puts
@@ -3318,9 +3325,7 @@ run_slave_mode ()
             slave)
                 fetch_gateways && sync_gateways || {
                     set_state slave-single
-                    ACTIVE_GATEWAYS_IPV4=
-                    ACTIVE_GATEWAYS_IPV6=
-                    SHOW_MASTER_ROUTES="${SHOW_ROUTES:-}"
+                    reset_active_gateways
                     false
                 }
             ;;
@@ -3355,9 +3360,7 @@ run_cluster_mode ()
                 puts
                 say "virtual IP detected on this host: '$VIP'"
                 set_state "$ROLE-master"
-                ACTIVE_GATEWAYS_IPV4=
-                ACTIVE_GATEWAYS_IPV6=
-                SHOW_MASTER_ROUTES="${SHOW_ROUTES:-}"
+                reset_active_gateways
             }
             check_gateways || {
                 select_gateways
@@ -3375,9 +3378,7 @@ run_cluster_mode ()
                     }
                     fetch_gateways && sync_gateways || {
                         set_state cluster-slave-single
-                        ACTIVE_GATEWAYS_IPV4=
-                        ACTIVE_GATEWAYS_IPV6=
-                        SHOW_MASTER_ROUTES="${SHOW_ROUTES:-}"
+                        reset_active_gateways
                         false
                     }
                 ;;
