@@ -2541,9 +2541,6 @@ report_dead_routes ()
 
 check_gateways ()
 {
-    is_not_empty "${ACTIVE_GATEWAYS_IPV4:-}${ACTIVE_GATEWAYS_IPV6:-}" ||
-        return
-
     RESULT=0
 
     ALIVE_ROUTE_MASKS_IPV4=
@@ -2554,6 +2551,9 @@ check_gateways ()
     ALIVE_GATEWAYS_IPV6=
     ALIVE_ROUTES_IPV6=
     reset_alive_metrics
+
+    is_not_empty "${ACTIVE_GATEWAYS_IPV4:-}${ACTIVE_GATEWAYS_IPV6:-}" ||
+        return
 
     for GATEWAY in $ACTIVE_GATEWAYS_IPV4 $ACTIVE_GATEWAYS_IPV6
     do
@@ -3278,8 +3278,8 @@ run_single_mode ()
     set_state "$ROLE"
     while loop
     do
-        say_gateways_state
         check_gateways || select_gateways
+        say_gateways_state
         say "next check cycle in: '$HUMAN_INTERVAL'"
         sleep $CHECK_INTERVAL
     done
