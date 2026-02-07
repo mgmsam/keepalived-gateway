@@ -3355,6 +3355,9 @@ run_cluster_mode ()
                 puts
                 say "virtual IP detected on this host: '$VIP'"
                 set_state "$ROLE-master"
+                ACTIVE_GATEWAYS_IPV4=
+                ACTIVE_GATEWAYS_IPV6=
+                SHOW_MASTER_ROUTES="${SHOW_ROUTES:-}"
             }
             check_gateways || {
                 select_gateways
