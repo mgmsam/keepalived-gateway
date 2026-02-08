@@ -17,8 +17,9 @@ An intelligent gateway health monitoring and routing table management solution f
 2. Copy files to system directories:
 
    ```bash
-   sudo cp ./keepalived-gateway/keepalived-gateway.sh      /usr/sbin/
-   sudo cp ./keepalived-gateway/keepalived-gateway.conf    /etc/
+   sudo mkdir /etc/keepalived-gateway/
+   sudo cp ./keepalived-gateway/keepalived-gateway.conf    /etc/keepalived-gateway/
+   sudo cp ./keepalived-gateway/keepalived-gateway.sh      /usr/sbin/keepalived-gateway
    sudo cp ./keepalived-gateway/keepalived-gateway.service /etc/systemd/system/
    ```
 
@@ -27,7 +28,7 @@ An intelligent gateway health monitoring and routing table management solution f
 Edit the configuration file to match your network environment:
 
 ```bash
-sudo vi /etc/keepalived-gateway.conf
+sudo vi /etc/keepalived-gateway/keepalived-gateway.conf
 ```
 
 ### Activation
@@ -35,7 +36,7 @@ sudo vi /etc/keepalived-gateway.conf
 1. Set execution permissions:
 
    ```bash
-   sudo chmod --verbose u+rwx,go+rx /usr/sbin/keepalived-gateway.sh
+   sudo chmod --verbose u+rwx,go+rx /usr/sbin/keepalived-gateway
    ```
 
 2. Reload systemd, enable and start the service:

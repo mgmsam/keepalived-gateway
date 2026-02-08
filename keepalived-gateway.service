@@ -1,10 +1,15 @@
 [Unit]
-Description=Gateway management
+Description=Keepalived Gateway Manager
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/sbin/keepalived-gateway.sh
+Type=simple
+ExecStart=/usr/sbin/keepalived-gateway
+Restart=always
+RestartSec=3s
+Capabilities=CAP_NET_ADMIN CAP_NET_RAW
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target
