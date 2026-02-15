@@ -269,7 +269,7 @@ setup_defaults ()
 include_config ()
 {
     CONFIG_INCLUDED=false
-    CONFIG_FILE=/etc/keepalived-gateway.conf
+    CONFIG_FILE=/etc/keepalived-gateway/keepalived-gateway.conf
 
     if is_file "$CONFIG_FILE"
     then
