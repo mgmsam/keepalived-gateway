@@ -2,6 +2,8 @@
 
 # Keepalived Gateway
 
+![Example of using keepalived-gateway](img/kg.png)
+
 An intelligent gateway health monitoring and routing table management solution for high-availability clusters. The script ensures automatic selection of the best available default route and seamless state synchronization between VRRP Master and Slave nodes.
 
 ## TL;DR
